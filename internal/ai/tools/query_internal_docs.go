@@ -21,11 +21,11 @@ func NewQueryInternalDocsTool() tool.InvokableTool {
 		func(ctx context.Context, input *QueryInternalDocsInput, opts ...tool.Option) (output string, err error) {
 			rr, err := retriever.NewMilvusRetriever(ctx)
 			if err != nil {
-				log.Fatal(err)
+				return "", err
 			}
 			resp, err := rr.Retrieve(ctx, input.Query)
 			if err != nil {
-				log.Fatal(err)
+				return "", err
 			}
 			respBytes, _ := json.Marshal(resp)
 			output = string(respBytes)

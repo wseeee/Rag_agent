@@ -12,6 +12,8 @@ import (
 
 	"github.com/cloudwego/eino/components/document"
 	"github.com/cloudwego/eino/compose"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
 // IndexDocument 清理 Milvus 中已存在的同源历史向量，执行 Eino 流水线完成加载、切分与向量索引入库
@@ -46,31 +48,36 @@ func DeleteDocumentVectors(ctx context.Context, identifier string) error {
 		return fmt.Errorf("init milvus client failed: %w", err)
 	}
 
+	collectionName := config.MilvusCollectionName
+	if v, _ := g.Cfg().Get(ctx, "milvus.collection_name"); !v.IsEmpty() {
+		collectionName = v.String()
+	}
+
 	cleanIdent := filepath.ToSlash(identifier)
 	expr := fmt.Sprintf(`metadata["_source"] like "%%%s%%"`, cleanIdent)
-	queryResult, err := cli.Query(ctx, config.MilvusCollectionName, []string{}, expr, []string{"id"})
+	queryResult, err := cli.Query(ctx, milvusclient.NewQueryOption(collectionName).WithFilter(expr).WithOutputFields("id"))
 	if err != nil {
 		return err
 	}
 
-	var idsToDelete []string
-	for _, column := range queryResult {
-		if column.Name() == "id" {
-			for i := 0; i < column.Len(); i++ {
-				id, err := column.GetAsString(i)
-				if err == nil {
-					idsToDelete = append(idsToDelete, id)
-				}
+	idCol := queryResult.GetColumn("id")
+	if idCol != nil && idCol.Len() > 0 {
+		var idsToDelete []string
+		for i := 0; i < idCol.Len(); i++ {
+			id, err := idCol.GetAsString(i)
+			if err == nil {
+				idsToDelete = append(idsToDelete, id)
 			}
 		}
-	}
 
-	if len(idsToDelete) > 0 {
-		deleteExpr := fmt.Sprintf(`id in ["%s"]`, strings.Join(idsToDelete, `","`))
-		if err := cli.Delete(ctx, config.MilvusCollectionName, "", deleteExpr); err != nil {
-			return err
+		if len(idsToDelete) > 0 {
+			deleteExpr := fmt.Sprintf(`id in ["%s"]`, strings.Join(idsToDelete, `","`))
+			_, err := cli.Delete(ctx, milvusclient.NewDeleteOption(collectionName).WithExpr(deleteExpr))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[info] deleted %d existing records matching: %s\n", len(idsToDelete), cleanIdent)
 		}
-		fmt.Printf("[info] deleted %d existing records matching: %s\n", len(idsToDelete), cleanIdent)
 	}
 	return nil
 }

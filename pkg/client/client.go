@@ -5,138 +5,132 @@ import (
 	"context"
 	"fmt"
 
-	cli "github.com/milvus-io/milvus-sdk-go/v2/client"
-	"github.com/milvus-io/milvus-sdk-go/v2/entity"
+	"github.com/gogf/gf/v2/frame/g"
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
-func NewMilvusClient(ctx context.Context) (cli.Client, error) {
-	// 1. 先连接default数据库
-	defaultClient, err := cli.NewClient(ctx, cli.Config{
-		Address: "localhost:19530",
-		DBName:  "default",
+// NewMilvusClient 初始化或获取 Milvus 2.5 原生客户端，并确保存储 Collection 具备内置 BM25 Function 与稀疏索引
+func NewMilvusClient(ctx context.Context) (*milvusclient.Client, error) {
+	addr := cfg.DefaultMilvusAddr
+	if v, _ := g.Cfg().Get(ctx, "milvus.addr"); !v.IsEmpty() {
+		addr = v.String()
+	}
+
+	defaultDB := cfg.DefaultMilvusDefaultDB
+	if v, _ := g.Cfg().Get(ctx, "milvus.default_db"); !v.IsEmpty() {
+		defaultDB = v.String()
+	}
+
+	dbName := cfg.MilvusDBName
+	if v, _ := g.Cfg().Get(ctx, "milvus.db_name"); !v.IsEmpty() {
+		dbName = v.String()
+	}
+
+	collectionName := cfg.MilvusCollectionName
+	if v, _ := g.Cfg().Get(ctx, "milvus.collection_name"); !v.IsEmpty() {
+		collectionName = v.String()
+	}
+
+	// 1. 先连接 default 库
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: addr,
+		DBName:  defaultDB,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to default database: %w", err)
+		return nil, fmt.Errorf("failed to connect to milvus default database: %w", err)
 	}
-	// 2. 检查agent数据库是否存在，不存在则创建
-	databases, err := defaultClient.ListDatabases(ctx)
+
+	// 2. 检查并创建业务数据库
+	dbs, err := cli.ListDatabase(ctx, milvusclient.NewListDatabaseOption())
 	if err != nil {
-		return nil, fmt.Errorf("failed to list databases: %w", err)
+		return nil, fmt.Errorf("list databases failed: %w", err)
 	}
-	agentDBExists := false
-	for _, db := range databases {
-		if db.Name == cfg.MilvusDBName {
-			agentDBExists = true
+	dbExists := false
+	for _, d := range dbs {
+		if d == dbName {
+			dbExists = true
 			break
 		}
 	}
-	if !agentDBExists {
-		err = defaultClient.CreateDatabase(ctx, cfg.MilvusDBName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create agent database: %w", err)
+	if !dbExists {
+		if err := cli.CreateDatabase(ctx, milvusclient.NewCreateDatabaseOption(dbName)); err != nil {
+			return nil, fmt.Errorf("create database %s failed: %w", dbName, err)
 		}
 	}
 
-	// 3. 创建连接到agent数据库的客户端
-	agentClient, err := cli.NewClient(ctx, cli.Config{
-		Address: "localhost:19530",
-		DBName:  cfg.MilvusDBName,
-	})
+	// 3. 切换至业务数据库
+	if err := cli.UseDatabase(ctx, milvusclient.NewUseDatabaseOption(dbName)); err != nil {
+		return nil, fmt.Errorf("use database %s failed: %w", dbName, err)
+	}
+
+	// 4. 检查集合是否存在，若存在但缺少 sparse_vector 稀疏字段则 Drop 重新初始化
+	hasCol, err := cli.HasCollection(ctx, milvusclient.NewHasCollectionOption(collectionName))
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to agent database: %w", err)
-	}
-	// 4. 检查biz collection是否存在，不存在则创建
-	collections, err := agentClient.ListCollections(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list collections: %w", err)
+		return nil, fmt.Errorf("check collection %s failed: %w", collectionName, err)
 	}
 
-	bizCollectionExists := false
-	for _, collection := range collections {
-		if collection.Name == cfg.MilvusCollectionName {
-			bizCollectionExists = true
-			break
-		}
-	}
-
-	if !bizCollectionExists {
-		// 创建biz collection的schema
-		schema := &entity.Schema{
-			CollectionName: cfg.MilvusCollectionName,
-			Description:    "Business knowledge collection",
-			Fields:         fields,
-		}
-
-		err = agentClient.CreateCollection(ctx, schema, entity.DefaultShardNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create biz collection: %w", err)
-		}
-
-		// 为id字段创建autoindex索引
-		idIndex, err := entity.NewIndexAUTOINDEX(entity.L2)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create id index: %w", err)
-		}
-		err = agentClient.CreateIndex(ctx, cfg.MilvusCollectionName, "id", idIndex, false)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create id index: %w", err)
-		}
-
-		// 为content字段创建autoindex索引
-		contentIndex, err := entity.NewIndexAUTOINDEX(entity.L2)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create content index: %w", err)
-		}
-		err = agentClient.CreateIndex(ctx, cfg.MilvusCollectionName, "content", contentIndex, false)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create content index: %w", err)
-		}
-
-		// 为vector字段创建autoindex索引
-		vectorIndex, err := entity.NewIndexAUTOINDEX(entity.HAMMING)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create vector index: %w", err)
-		}
-		err = agentClient.CreateIndex(ctx, cfg.MilvusCollectionName, "vector", vectorIndex, false)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create vector index: %w", err)
+	needRecreate := !hasCol
+	if hasCol {
+		colDesc, err := cli.DescribeCollection(ctx, milvusclient.NewDescribeCollectionOption(collectionName))
+		if err == nil && colDesc != nil && colDesc.Schema != nil {
+			hasSparse := false
+			for _, f := range colDesc.Schema.Fields {
+				if f.Name == "sparse_vector" {
+					hasSparse = true
+					break
+				}
+			}
+			hasFunc := len(colDesc.Schema.Functions) > 0
+			if !hasSparse || !hasFunc {
+				_ = cli.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
+				needRecreate = true
+			}
 		}
 	}
 
-	// 关闭default数据库连接
-	defaultClient.Close()
+	if needRecreate {
+		idField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeVarChar).WithMaxLength(256).WithIsPrimaryKey(true)
+		vectorField := entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2048)
+		contentField := entity.NewField().WithName("content").WithDataType(entity.FieldTypeVarChar).WithMaxLength(8192).WithEnableAnalyzer(true).WithEnableMatch(true)
+		sparseField := entity.NewField().WithName("sparse_vector").WithDataType(entity.FieldTypeSparseVector)
+		metaField := entity.NewField().WithName("metadata").WithDataType(entity.FieldTypeJSON)
 
-	// 确保集合加载到内存供检索
-	_ = agentClient.LoadCollection(ctx, cfg.MilvusCollectionName, false)
+		bm25Func := entity.NewFunction().
+			WithName("content_bm25").
+			WithInputFields("content").
+			WithOutputFields("sparse_vector").
+			WithType(entity.FunctionTypeBM25)
 
-	return agentClient, nil
-}
+		schema := entity.NewSchema().
+			WithName(collectionName).
+			WithField(idField).
+			WithField(vectorField).
+			WithField(contentField).
+			WithField(sparseField).
+			WithField(metaField).
+			WithFunction(bm25Func)
 
-var fields = []*entity.Field{
-	{
-		Name:     "id",
-		DataType: entity.FieldTypeVarChar,
-		TypeParams: map[string]string{
-			"max_length": "256",
-		},
-		PrimaryKey: true,
-	},
-	{
-		Name:     "vector", // 确保字段名匹配
-		DataType: entity.FieldTypeBinaryVector,
-		TypeParams: map[string]string{
-			"dim": "65536",
-		},
-	},
-	{
-		Name:     "content",
-		DataType: entity.FieldTypeVarChar,
-		TypeParams: map[string]string{
-			"max_length": "8192",
-		},
-	},
-	{
-		Name:     "metadata",
-		DataType: entity.FieldTypeJSON,
-	},
+		hnswIdx := index.NewHNSWIndex(entity.COSINE, 16, 64)
+		sparseIdx := index.NewSparseInvertedIndex(entity.BM25, 0.2)
+
+		createOpt := milvusclient.NewCreateCollectionOption(collectionName, schema).
+			WithIndexOptions(
+				milvusclient.NewCreateIndexOption(collectionName, "vector", hnswIdx),
+				milvusclient.NewCreateIndexOption(collectionName, "sparse_vector", sparseIdx),
+			)
+
+		if err := cli.CreateCollection(ctx, createOpt); err != nil {
+			return nil, fmt.Errorf("create collection %s with BM25 function failed: %w", collectionName, err)
+		}
+	}
+
+	// 5. 确保集合加载到内存供检索
+	loadTask, err := cli.LoadCollection(ctx, milvusclient.NewLoadCollectionOption(collectionName))
+	if err == nil {
+		_ = loadTask.Await(ctx)
+	}
+
+	return cli, nil
 }
