@@ -52,3 +52,17 @@ kafka:
 tika:
   server_url: "http://127.0.0.1:9998"
 
+# Milvus 向量数据库连接与集合配置
+milvus:
+  addr: "localhost:19530"
+  default_db: "default"
+  db_name: "agent"
+  collection_name: "biz"
+
+# 知识库双引擎检索与加权重排序配置
+retriever:
+  top_k: 8
+  dense_weight: 0.7
+  bm25_weight: 0.3
+
+

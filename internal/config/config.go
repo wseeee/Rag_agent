@@ -9,6 +9,9 @@ const (
 	MilvusDBName         = "agent"
 	MilvusCollectionName = "biz"
 
+	DefaultMilvusAddr      = "localhost:19530"
+	DefaultMilvusDefaultDB = "default"
+
 	DefaultRedisAddr      = "127.0.0.1:6379"
 	DefaultRedisPassword  = ""
 	DefaultRedisDB        = 1
