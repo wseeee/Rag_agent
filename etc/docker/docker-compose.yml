@@ -30,7 +30,7 @@ services:
       - "9001:9001"
       - "9000:9000"
     volumes:
-      - ./volumes/minio:/minio_data
+      - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -98,8 +98,6 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-    volumes:
-      - ./volumes/zookeeper:/var/lib/zookeeper/data
 
   kafka:
     container_name: sba-kafka
@@ -113,13 +111,14 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://127.0.0.1:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-    volumes:
-      - ./volumes/kafka:/var/lib/kafka/data
 
 networks:
   default:
     name: superbiz_network
+
+volumes:
+  minio_data:

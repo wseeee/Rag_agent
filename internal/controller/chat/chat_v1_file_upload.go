@@ -1,20 +1,14 @@
 package chat
 
 import (
-	"SuperBizAgent/api/chat/v1"
-	"SuperBizAgent/internal/ai/agent/knowledge_index_pipeline"
-	loader2 "SuperBizAgent/internal/ai/loader"
-	"SuperBizAgent/internal/config"
-	"SuperBizAgent/pkg/client"
-	"SuperBizAgent/pkg/log_call_back"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/cloudwego/eino/components/document"
-	"github.com/cloudwego/eino/compose"
+	"SuperBizAgent/api/chat/v1"
+	"SuperBizAgent/internal/ai/agent/knowledge_index_pipeline"
+	"SuperBizAgent/internal/config"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -57,64 +51,10 @@ func (c *ControllerV1) FileUpload(ctx context.Context, req *v1.FileUploadReq) (r
 		FilePath: savePath,
 		FileSize: fileInfo.Size(),
 	}
-	err = buildIntoIndex(ctx, config.FileDir+"/"+newFileName)
+	_, err = knowledge_index_pipeline.IndexDocument(ctx, config.FileDir+"/"+newFileName)
 	if err != nil {
 		return nil, gerror.Wrapf(err, "构建知识库失败")
 	}
 	return res, nil
 }
 
-func buildIntoIndex(ctx context.Context, path string) error {
-	cleanPath := filepath.ToSlash(path)
-	r, err := knowledge_index_pipeline.BuildKnowledgeIndexing(ctx)
-	// 删除biz数据metadata中_source一样的数据
-	loader, err := loader2.NewFileLoader(ctx)
-	if err != nil {
-		return err
-	}
-	docs, err := loader.Load(ctx, document.Source{URI: cleanPath})
-	if err != nil {
-		return err
-	}
-	cli, err := client.NewMilvusClient(ctx)
-	if err != nil {
-		return err
-	}
-	// 查询所有metadata中_source一样的数据并删除
-	source := filepath.ToSlash(fmt.Sprintf("%v", docs[0].MetaData["_source"]))
-	expr := fmt.Sprintf(`metadata["_source"] == "%s"`, source)
-	queryResult, err := cli.Query(ctx, config.MilvusCollectionName, []string{}, expr, []string{"id"})
-	if err != nil {
-		return err
-	} else if len(queryResult) > 0 {
-		// 提取所有需要删除的id
-		var idsToDelete []string
-		for _, column := range queryResult {
-			if column.Name() == "id" {
-				for i := 0; i < column.Len(); i++ {
-					id, err := column.GetAsString(i)
-					if err == nil {
-						idsToDelete = append(idsToDelete, id)
-					}
-				}
-			}
-		}
-		// 删除这些数据
-		if len(idsToDelete) > 0 {
-			deleteExpr := fmt.Sprintf(`id in ["%s"]`, strings.Join(idsToDelete, `","`))
-			err = cli.Delete(ctx, config.MilvusCollectionName, "", deleteExpr)
-			if err != nil {
-				fmt.Printf("[warn] delete existing data failed: %v\n", err)
-			} else {
-				fmt.Printf("[info] deleted %d existing records with _source: %s\n", len(idsToDelete), docs[0].MetaData["_source"])
-			}
-		}
-	}
-	// 重新构建
-	ids, err := r.Invoke(ctx, document.Source{URI: cleanPath}, compose.WithCallbacks(log_call_back.LogCallback(nil)))
-	if err != nil {
-		return fmt.Errorf("invoke index graph failed: %w", err)
-	}
-	fmt.Printf("[done] indexing file: %s, len of parts: %d\n", cleanPath, len(ids))
-	return nil
-}
