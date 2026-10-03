@@ -48,3 +48,7 @@ kafka:
   topic: "superbiz-file-processing"
   group_id: "superbiz-file-indexer-group"
 
+# Apache Tika 文档抽取服务配置
+tika:
+  server_url: "http://127.0.0.1:9998"
+

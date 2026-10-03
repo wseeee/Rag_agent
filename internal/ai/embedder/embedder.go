@@ -10,6 +10,11 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
+type batchingEmbedder struct {
+	inner     embedding.Embedder
+	batchSize int
+}
+
 func DoubaoEmbedding(ctx context.Context) (eb embedding.Embedder, err error) {
 	model, err := g.Cfg().Get(ctx, "doubao_embedding_model.model")
 	if err != nil {
@@ -29,5 +34,28 @@ func DoubaoEmbedding(ctx context.Context) (eb embedding.Embedder, err error) {
 		log.Printf("new embedder error: %v\n", err)
 		return nil, err
 	}
-	return embedder, nil
+	return &batchingEmbedder{
+		inner:     embedder,
+		batchSize: 10,
+	}, nil
+}
+
+func (b *batchingEmbedder) EmbedStrings(ctx context.Context, texts []string, opts ...embedding.Option) ([][]float64, error) {
+	if len(texts) <= b.batchSize {
+		return b.inner.EmbedStrings(ctx, texts, opts...)
+	}
+	allEmbeddings := make([][]float64, 0, len(texts))
+	for i := 0; i < len(texts); i += b.batchSize {
+		end := i + b.batchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		batch := texts[i:end]
+		res, err := b.inner.EmbedStrings(ctx, batch, opts...)
+		if err != nil {
+			return nil, err
+		}
+		allEmbeddings = append(allEmbeddings, res...)
+	}
+	return allEmbeddings, nil
 }

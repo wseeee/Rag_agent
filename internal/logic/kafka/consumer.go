@@ -3,13 +3,16 @@ package kafka
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"SuperBizAgent/internal/ai/agent/knowledge_index_pipeline"
 	"SuperBizAgent/internal/config"
 	pkgKafka "SuperBizAgent/pkg/kafka"
 	"SuperBizAgent/pkg/storage"
+	"SuperBizAgent/pkg/tika"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -21,6 +24,7 @@ type IndexingConsumer struct {
 	consumer     *pkgKafka.TaskConsumer
 	minioStorage *storage.MinioStorage
 	redisClient  *redis.Client
+	tikaClient   *tika.Client
 }
 
 // NewIndexingConsumer 创建文档索引消费端
@@ -28,11 +32,13 @@ func NewIndexingConsumer(
 	consumer *pkgKafka.TaskConsumer,
 	minioStorage *storage.MinioStorage,
 	redisClient *redis.Client,
+	tikaClient *tika.Client,
 ) *IndexingConsumer {
 	return &IndexingConsumer{
 		consumer:     consumer,
 		minioStorage: minioStorage,
 		redisClient:  redisClient,
+		tikaClient:   tikaClient,
 	}
 }
 
@@ -120,8 +126,36 @@ func (c *IndexingConsumer) processTask(ctx context.Context, task *pkgKafka.FileP
 		return err
 	}
 
-	// 4. 调用向量化 Pipeline 构建知识库
-	ids, err := knowledge_index_pipeline.IndexDocument(ctx, localPath)
+	// 4. 若为富媒体文档 (PDF, Word, Excel, PPT, HTML 等)，通过 Apache Tika 提取纯文本
+	indexTargetFilePath := localPath
+	ext := strings.ToLower(filepath.Ext(task.FileName))
+	richTextExts := map[string]bool{
+		".pdf": true, ".docx": true, ".doc": true, ".xlsx": true, ".xls": true, ".pptx": true, ".ppt": true, ".html": true, ".htm": true,
+	}
+
+	if richTextExts[ext] {
+		g.Log().Infof(ctx, "[Kafka Consumer] 检测到富媒体文档 %s，使用 Apache Tika 提取正文...", task.FileName)
+		f, openErr := os.Open(localPath)
+		if openErr != nil {
+			c.markFailed(ctx, taskKey, fmt.Sprintf("打开本地文件失败: %v", openErr))
+			return openErr
+		}
+		defer f.Close()
+
+		extractedText, extractErr := c.tikaClient.ExtractText(ctx, f, task.FileName)
+		if extractErr != nil {
+			g.Log().Warningf(ctx, "[Kafka Consumer] Tika 提取文本失败: %v，降级为直接索引", extractErr)
+		} else if strings.TrimSpace(extractedText) != "" {
+			convertedPath := localPath + ".txt"
+			if writeErr := gfile.PutContents(convertedPath, extractedText); writeErr == nil {
+				indexTargetFilePath = convertedPath
+				g.Log().Infof(ctx, "[Kafka Consumer] Tika 成功提取正文 (%d 字符)，保存为 %s", len(extractedText), convertedPath)
+			}
+		}
+	}
+
+	// 5. 调用向量化 Pipeline 构建知识库
+	ids, err := knowledge_index_pipeline.IndexDocument(ctx, indexTargetFilePath)
 	if err != nil {
 		c.markFailed(ctx, taskKey, fmt.Sprintf("构建向量索引失败: %v", err))
 		return err
@@ -218,8 +252,12 @@ func InitAndStartConsumer(ctx context.Context) (*IndexingConsumer, error) {
 		kafkaGroupID = v.String()
 	}
 
+	// Tika
+	tikaURL := g.Cfg().MustGet(ctx, "tika.server_url").String()
+	tikaClient := tika.NewClient(tikaURL)
+
 	consumer := pkgKafka.NewTaskConsumer(kafkaBrokers, kafkaTopic, kafkaGroupID)
-	indexingConsumer := NewIndexingConsumer(consumer, ms, rdb)
+	indexingConsumer := NewIndexingConsumer(consumer, ms, rdb, tikaClient)
 
 	go indexingConsumer.Start(ctx)
 

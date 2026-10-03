@@ -47,35 +47,25 @@ chmod +x start.sh
 
 ## 后端 API
 
-### 上传文件接口
+### 分片断点上传与合并接口
 
-**URL**: `/api/upload`
+1. **秒传与进度检查**：`POST /api/upload/check`
+   - 参数：`fileMd5`, `fileName`, `totalChunks`
+   - 响应：`isUploaded`（秒传成功）或 `uploadedChunks`（已完成分片索引）
 
-**方法**: `POST`
+2. **分片上传**：`POST /api/upload/chunk`
+   - 参数：`file`（分片数据）, `fileMd5`, `chunkIndex`
+   - 响应：分片上传状态
 
-**Content-Type**: `multipart/form-data`
+3. **分片合并**：`POST /api/upload/merge`
+   - 参数：`fileMd5`, `fileName`, `totalChunks`, `totalSize`
+   - 响应：合并完成并由 Kafka 异步触发 Tika 抽取与向量化
 
-**参数**:
-- `file`: 要上传的文件（必需）
-
-**响应示例**:
-```json
-{
-  "message": "OK",
-  "data": {
-    "fileName": "example.pdf",
-    "filePath": "/Users/wuxufei/GolandProjects/SuperBizAgent/docs/example.pdf",
-    "fileSize": 1024000
-  }
-}
-```
-
-### 使用 curl 上传示例
-
-```bash
-curl -X POST http://localhost:6872/api/upload \
-  -F "file=@/path/to/your/file.csv"
-```
+4. **知识库文档管理**：
+   - 列表查询：`GET /api/documents/list`
+   - 在线预览：`GET /api/documents/preview?fileMd5=...`
+   - 安全下载：`GET /api/documents/download?fileMd5=...`
+   - 级联删除：`DELETE /api/documents/:fileMd5`
 
 ## 技术栈
 
