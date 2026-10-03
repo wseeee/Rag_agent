@@ -29,3 +29,22 @@ file_dir: "./docs"
 
 # 腾讯云托管MCP下架，使用本地部署方案
 mcp_url: "http://localhost:3000/sse"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+minio:
+  endpoint: "127.0.0.1:9000"
+  accessKey: "minioadmin"
+  secretKey: "minioadmin"
+  useSSL: false
+  bucket: "superbiz-documents"
+
+kafka:
+  brokers:
+    - "127.0.0.1:9092"
+  topic: "superbiz-file-processing"
+  group_id: "superbiz-file-indexer-group"
+

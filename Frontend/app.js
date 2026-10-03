@@ -993,7 +993,49 @@ class SuperBizAgentApp {
         return allowedExtensions.some(ext => fileName.endsWith(ext));
     }
 
-    // 上传文件到知识库
+    // 计算文件的 MD5 校验码（支持大文件分片流式计算）
+    async calculateFileMD5(file) {
+        return new Promise((resolve, reject) => {
+            const chunkSize = 2 * 1024 * 1024;
+            const chunks = Math.ceil(file.size / chunkSize);
+            let currentChunk = 0;
+
+            if (typeof SparkMD5 !== 'undefined') {
+                const spark = new SparkMD5.ArrayBuffer();
+                const fileReader = new FileReader();
+
+                fileReader.onload = (e) => {
+                    spark.append(e.target.result);
+                    currentChunk++;
+                    if (currentChunk < chunks) {
+                        loadNext();
+                    } else {
+                        resolve(spark.end());
+                    }
+                };
+
+                fileReader.onerror = () => reject(new Error('读取文件失败'));
+
+                const loadNext = () => {
+                    const start = currentChunk * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    fileReader.readAsArrayBuffer(file.slice(start, end));
+                };
+
+                loadNext();
+            } else {
+                // 降级方案：若未加载 SparkMD5，采用 SHA-256 并截取 32 位十六进制
+                file.arrayBuffer().then(buf => {
+                    crypto.subtle.digest('SHA-256', buf).then(hash => {
+                        const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+                        resolve(hex.substring(0, 32));
+                    }).catch(reject);
+                }).catch(reject);
+            }
+        });
+    }
+
+    // 上传文件到知识库（分片流式上传、断点续传、秒传与异步入库）
     async uploadFile(file) {
         // 再次验证文件类型（双重保险）
         if (!this.validateFileType(file)) {
@@ -1001,42 +1043,94 @@ class SuperBizAgentApp {
             return;
         }
 
-        // 验证文件大小（限制为50MB）
-        const maxSize = 50 * 1024 * 1024;
+        // 验证文件大小（限制为100MB）
+        const maxSize = 100 * 1024 * 1024;
         if (file.size > maxSize) {
-            this.showNotification('文件大小不能超过50MB', 'error');
+            this.showNotification('文件大小不能超过100MB', 'error');
             return;
         }
 
         // 锁定前端并显示上传遮罩层
         this.isStreaming = true;
         this.updateUI();
-        this.showUploadOverlay(true, file.name);
+        this.showUploadOverlay(true, file.name, '正在计算文件校验码 (MD5)...');
 
         try {
-            // 创建 FormData
-            const formData = new FormData();
-            formData.append('file', file);
+            // 步骤 1: 计算文件 MD5
+            const fileMd5 = await this.calculateFileMD5(file);
+            const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB 单分片
+            const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
 
-            // 发送上传请求
-            const response = await fetch(`${this.apiBaseUrl}/upload`, {
+            // 步骤 2: 检查秒传与断点进度
+            this.showUploadOverlay(true, file.name, '正在检查秒传与分片状态...');
+            const checkRes = await fetch(`${this.apiBaseUrl}/upload/check`, {
                 method: 'POST',
-                body: formData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileMd5, fileName: file.name, totalChunks })
             });
 
-            if (!response.ok) {
-                throw new Error(`HTTP错误: ${response.status}`);
+            if (!checkRes.ok) {
+                throw new Error(`检查分片状态失败 (HTTP ${checkRes.status})`);
             }
 
-            const data = await response.json();
-
-            if (data.message === 'OK' && data.data) {
-                // 在聊天界面显示上传成功消息
-                const successMessage = `${file.name} 上传到知识库成功`;
-                this.addMessage('assistant', successMessage, false, true);
-            } else {
-                throw new Error(data.message || '上传失败');
+            const checkData = await checkRes.json();
+            if (checkData.data && checkData.data.isUploaded) {
+                // 命中秒传！直接返回成功
+                this.addMessage('assistant', `⚡ **秒传成功！** 文件 \`${file.name}\` 已经在知识库中就绪。`, false, true);
+                return;
             }
+
+            const uploadedChunks = new Set(checkData.data?.uploadedChunks || []);
+
+            // 步骤 3: 循环上传未完成的分片（支持断点恢复）
+            for (let i = 0; i < totalChunks; i++) {
+                if (uploadedChunks.has(i)) {
+                    continue; // 跳过已上传的分片
+                }
+
+                const percent = Math.round(((i + 1) / totalChunks) * 100);
+                this.showUploadOverlay(true, file.name, `正在上传分片: ${i + 1}/${totalChunks} (${percent}%)`);
+
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(file.size, (i + 1) * CHUNK_SIZE);
+                const chunkBlob = file.slice(start, end);
+
+                const formData = new FormData();
+                formData.append('file', chunkBlob, `${file.name}.part${i}`);
+                formData.append('fileMd5', fileMd5);
+                formData.append('chunkIndex', i.toString());
+                formData.append('totalChunks', totalChunks.toString());
+
+                const chunkRes = await fetch(`${this.apiBaseUrl}/upload/chunk`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!chunkRes.ok) {
+                    throw new Error(`上传第 ${i + 1} 个分片失败 (HTTP ${chunkRes.status})`);
+                }
+            }
+
+            // 步骤 4: 请求后端合并分片并发布 Kafka 异步任务
+            this.showUploadOverlay(true, file.name, '正在合并分片并创建知识库索引任务...');
+            const mergeRes = await fetch(`${this.apiBaseUrl}/upload/merge`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fileMd5: fileMd5,
+                    fileName: file.name,
+                    totalChunks: totalChunks,
+                    totalSize: file.size
+                })
+            });
+
+            if (!mergeRes.ok) {
+                throw new Error(`合并分片失败 (HTTP ${mergeRes.status})`);
+            }
+
+            const mergeData = await mergeRes.json();
+            const taskId = mergeData.data?.taskId || '异步队列处理中';
+            this.addMessage('assistant', `✅ **${file.name}** 上传完成！后台正在通过 Kafka 异步进行向量化入库（任务ID: \`${taskId}\`）。`, false, true);
         } catch (error) {
             console.error('文件上传失败:', error);
             this.showNotification('文件上传失败: ' + error.message, 'error');
@@ -1323,15 +1417,15 @@ class SuperBizAgentApp {
     }
 
     // 显示/隐藏上传遮罩层
-    showUploadOverlay(show, fileName = '') {
+    showUploadOverlay(show, fileName = '', detailText = '') {
         if (this.loadingOverlay) {
             if (show) {
                 this.loadingOverlay.style.display = 'flex';
                 // 更新文字为上传中
                 const loadingText = this.loadingOverlay.querySelector('.loading-text');
                 const loadingSubtext = this.loadingOverlay.querySelector('.loading-subtext');
-                if (loadingText) loadingText.textContent = '正在上传文件...';
-                if (loadingSubtext) loadingSubtext.textContent = fileName ? `上传: ${fileName}` : '请稍候';
+                if (loadingText) loadingText.textContent = detailText || '正在上传文件...';
+                if (loadingSubtext) loadingSubtext.textContent = fileName ? `文件: ${fileName}` : '请稍候';
                 // 防止页面滚动
                 document.body.style.overflow = 'hidden';
             } else {
