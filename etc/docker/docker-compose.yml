@@ -116,6 +116,13 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
 
+  tika:
+    container_name: sba-tika
+    image: apache/tika:latest-full
+    restart: always
+    ports:
+      - "9998:9998"
+
 networks:
   default:
     name: superbiz_network

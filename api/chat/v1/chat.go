@@ -23,16 +23,6 @@ type ChatStreamReq struct {
 type ChatStreamRes struct {
 }
 
-type FileUploadReq struct {
-	g.Meta `path:"/upload" method:"post" mime:"multipart/form-data" summary:"文件上传"`
-}
-
-type FileUploadRes struct {
-	FileName string `json:"fileName" dc:"保存的文件名"`
-	FilePath string `json:"filePath" dc:"文件保存路径"`
-	FileSize int64  `json:"fileSize" dc:"文件大小(字节)"`
-}
-
 type AIOpsReq struct {
 	g.Meta `path:"/ai_ops" method:"post" summary:"AI运维"`
 }
@@ -79,5 +69,57 @@ type UploadMergeRes struct {
 	TaskID         string `json:"taskId" dc:"异步处理任务ID"`
 	MinIOObjectKey string `json:"minioObjectKey" dc:"MinIO对象键"`
 	Status         string `json:"status" dc:"任务状态: PENDING/PROCESSING"`
+}
+
+// DocumentInfo 表示知识库文档条目信息
+type DocumentInfo struct {
+	FileMD5      string `json:"fileMd5" dc:"文件MD5"`
+	FileName     string `json:"fileName" dc:"文件名"`
+	FileSize     int64  `json:"fileSize" dc:"文件字节大小"`
+	LastModified string `json:"lastModified" dc:"最后修改时间"`
+}
+
+type DocumentListReq struct {
+	g.Meta `path:"/documents/list" method:"get" summary:"获取知识库已上传文档列表"`
+}
+
+type DocumentListRes struct {
+	Total int            `json:"total" dc:"文档总数"`
+	Items []DocumentInfo `json:"items" dc:"文档列表"`
+}
+
+type DocumentDeleteReq struct {
+	g.Meta  `path:"/documents/:fileMd5" method:"delete" summary:"级联删除指定知识库文档"`
+	FileMD5 string `p:"fileMd5" v:"required#文件MD5不能为空"`
+}
+
+type DocumentDeleteRes struct {
+	Success bool   `json:"success" dc:"是否删除成功"`
+	Message string `json:"message" dc:"操作提示"`
+}
+
+type DocumentDownloadReq struct {
+	g.Meta   `path:"/documents/download" method:"get" summary:"获取文档临时预签名下载链接"`
+	FileMD5  string `p:"fileMd5" v:"required#文件MD5不能为空"`
+	FileName string `p:"fileName" v:"required#文件名不能为空"`
+}
+
+type DocumentDownloadRes struct {
+	FileName    string `json:"fileName" dc:"文件名"`
+	DownloadURL string `json:"downloadUrl" dc:"预签名下载链接"`
+	ExpiresIn   int64  `json:"expiresIn" dc:"有效秒数"`
+}
+
+type DocumentPreviewReq struct {
+	g.Meta   `path:"/documents/preview" method:"get" summary:"在线预览文档内容"`
+	FileMD5  string `p:"fileMd5" v:"required#文件MD5不能为空"`
+	FileName string `p:"fileName" v:"required#文件名不能为空"`
+	MaxBytes int64  `p:"maxBytes" d:"16384" dc:"最大读取字节数"`
+}
+
+type DocumentPreviewRes struct {
+	FileName string `json:"fileName" dc:"文件名"`
+	Content  string `json:"content" dc:"文本内容"`
+	FileSize int64  `json:"fileSize" dc:"总文件大小"`
 }
 

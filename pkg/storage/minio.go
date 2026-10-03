@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -180,6 +183,95 @@ func (s *MinioStorage) DownloadObject(ctx context.Context, objectName, localFile
 // BucketName 返回当前存储桶名称
 func (s *MinioStorage) BucketName() string {
 	return s.bucketName
+}
+
+// DocumentItem 表示 MinIO 中已合并持久化的文档
+type DocumentItem struct {
+	FileMD5      string    `json:"fileMd5"`
+	FileName     string    `json:"fileName"`
+	Size         int64     `json:"size"`
+	LastModified time.Time `json:"lastModified"`
+}
+
+// ListMergedDocuments 列出 merged/ 目录下所有的已合并文档
+func (s *MinioStorage) ListMergedDocuments(ctx context.Context) ([]DocumentItem, error) {
+	prefix := "merged/"
+	objects := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	})
+
+	var items []DocumentItem
+	for obj := range objects {
+		if obj.Err != nil {
+			return nil, obj.Err
+		}
+		// 对象路径约定: merged/{fileMD5}/{fileName}
+		parts := strings.Split(obj.Key, "/")
+		if len(parts) >= 3 {
+			items = append(items, DocumentItem{
+				FileMD5:      parts[1],
+				FileName:     parts[2],
+				Size:         obj.Size,
+				LastModified: obj.LastModified,
+			})
+		}
+	}
+	return items, nil
+}
+
+// DeleteDocumentByMD5 级联删除 MinIO 中该 MD5 下的已合并文件与残留分片
+func (s *MinioStorage) DeleteDocumentByMD5(ctx context.Context, fileMD5 string) error {
+	prefixes := []string{
+		fmt.Sprintf("chunks/%s/", fileMD5),
+		fmt.Sprintf("merged/%s/", fileMD5),
+	}
+	for _, p := range prefixes {
+		objects := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+			Prefix:    p,
+			Recursive: true,
+		})
+		for obj := range objects {
+			if obj.Err == nil {
+				_ = s.client.RemoveObject(ctx, s.bucketName, obj.Key, minio.RemoveObjectOptions{})
+			}
+		}
+	}
+	return nil
+}
+
+// GetPresignedDownloadURL 为指定文档生成 15 分钟有效的预签名下载链接
+func (s *MinioStorage) GetPresignedDownloadURL(ctx context.Context, fileMD5, fileName string, expires time.Duration) (string, error) {
+	objectKey := s.MergedPath(fileMD5, fileName)
+	reqParams := make(url.Values)
+	reqParams.Set("response-content-disposition", fmt.Sprintf("attachment; filename=\"%s\"", url.QueryEscape(fileName)))
+	u, err := s.client.PresignedGetObject(ctx, s.bucketName, objectKey, expires, reqParams)
+	if err != nil {
+		return "", err
+	}
+	return u.String(), nil
+}
+
+// GetDocumentPreview 读取指定文档的前 maxBytes 字节内容用于文本预览
+func (s *MinioStorage) GetDocumentPreview(ctx context.Context, fileMD5, fileName string, maxBytes int64) (string, int64, error) {
+	objectKey := s.MergedPath(fileMD5, fileName)
+	obj, err := s.client.GetObject(ctx, s.bucketName, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return "", 0, err
+	}
+	defer obj.Close()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+
+	limitReader := io.LimitReader(obj, maxBytes)
+	data, err := io.ReadAll(limitReader)
+	if err != nil {
+		return "", 0, err
+	}
+	return string(data), stat.Size, nil
 }
 
 

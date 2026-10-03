@@ -28,6 +28,13 @@
                     </svg>
                     <span>新建对话</span>
                 </button>
+                <button class="new-chat-btn" id="knowledgeBaseBtn" style="border: 1px solid #c2e7ff; background: #ffffff;">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M6.5 2H20V22H6.5A2.5 2.5 0 0 1 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>知识库管理</span>
+                </button>
                 
                 <div class="chat-history-section">
                     <div class="history-header">
@@ -115,10 +122,63 @@
                             </div>
                         </div>
                     </div>
-                    <input type="file" id="fileInput" accept=".txt,.md,.markdown" style="display: none;">
+                    <input type="file" id="fileInput" accept=".txt,.md,.markdown,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt" style="display: none;">
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- 知识库文档管理抽屉模态框 -->
+    <div id="knowledgeModal" class="kb-modal" style="display: none;">
+        <div class="kb-modal-content">
+            <div class="kb-modal-header">
+                <div class="kb-header-title">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M6.5 2H20V22H6.5A2.5 2.5 0 0 1 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <h3>知识库文档管理</h3>
+                </div>
+                <div class="kb-header-actions">
+                    <button class="kb-btn kb-btn-refresh" id="refreshKbBtn">刷新</button>
+                    <button class="kb-close-btn" id="closeKbBtn">&times;</button>
+                </div>
+            </div>
+            <div class="kb-modal-body">
+                <div class="kb-toolbar">
+                    <input type="text" id="kbSearchInput" placeholder="搜索文档名或 MD5..." class="kb-search-input">
+                    <span id="kbDocCount" class="kb-doc-count">共 0 篇文档</span>
+                </div>
+                <div class="kb-table-container">
+                    <table class="kb-table">
+                        <thead>
+                            <tr>
+                                <th>文档名称</th>
+                                <th>大小</th>
+                                <th>最后更新</th>
+                                <th style="text-align: right;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kbTableBody">
+                            <tr><td colspan="4" style="text-align: center; color: #5f6368; padding: 24px;">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文档预览模态框 -->
+    <div id="previewModal" class="preview-modal" style="display: none;">
+        <div class="preview-modal-content">
+            <div class="preview-modal-header">
+                <h4 id="previewDocTitle">文档预览</h4>
+                <button class="kb-close-btn" id="closePreviewBtn">&times;</button>
+            </div>
+            <div class="preview-modal-body">
+                <pre id="previewDocContent">加载中...</pre>
+            </div>
+        </div>
     </div>
 
     <!-- 加载遮罩层 -->

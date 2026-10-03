@@ -15,6 +15,7 @@ class SuperBizAgentApp {
         this.initMarkdown();
         this.checkAndSetCentered();
         this.renderChatHistory();
+        window.app = this;
     }
 
     // 初始化Markdown配置
@@ -58,7 +59,7 @@ class SuperBizAgentApp {
         checkMarked();
     }
 
-    // 安全地渲染 Markdown
+    // 安全地渲染 Markdown 并解析出处角标
     renderMarkdown(content) {
         if (!content) return '';
         
@@ -69,7 +70,12 @@ class SuperBizAgentApp {
         }
         
         try {
-            const html = marked.parse(content);
+            let html = marked.parse(content);
+            // 自动将出处引用如 (来源#1: 告警处理手册.md) 转换为精美交互角标
+            html = html.replace(/[(（](?:来源|参考)#?(\d+):\s*([^)]+)[)）]/g, (match, id, file) => {
+                const cleanFile = file.trim();
+                return `<span class="citation-badge" title="参考文档: ${cleanFile}" onclick="window.app && window.app.highlightSourceDoc('${cleanFile}')"><span class="citation-icon">📚</span>${cleanFile}</span>`;
+            });
             return html;
         } catch (e) {
             console.error('Markdown 渲染失败:', e);
@@ -116,6 +122,20 @@ class SuperBizAgentApp {
         this.chatContainer = document.querySelector('.chat-container');
         this.welcomeGreeting = document.getElementById('welcomeGreeting');
         this.chatHistoryList = document.getElementById('chatHistoryList');
+
+        // 知识库管理与预览元素
+        this.knowledgeBaseBtn = document.getElementById('knowledgeBaseBtn');
+        this.knowledgeModal = document.getElementById('knowledgeModal');
+        this.closeKbBtn = document.getElementById('closeKbBtn');
+        this.refreshKbBtn = document.getElementById('refreshKbBtn');
+        this.kbSearchInput = document.getElementById('kbSearchInput');
+        this.kbDocCount = document.getElementById('kbDocCount');
+        this.kbTableBody = document.getElementById('kbTableBody');
+        this.previewModal = document.getElementById('previewModal');
+        this.closePreviewBtn = document.getElementById('closePreviewBtn');
+        this.previewDocTitle = document.getElementById('previewDocTitle');
+        this.previewDocContent = document.getElementById('previewDocContent');
+        this.cachedDocuments = [];
         
         // 初始化时检查是否需要居中
         this.checkAndSetCentered();
@@ -126,6 +146,25 @@ class SuperBizAgentApp {
         // 新建对话
         if (this.newChatBtn) {
             this.newChatBtn.addEventListener('click', () => this.newChat());
+        }
+
+        // 知识库管理按钮
+        if (this.knowledgeBaseBtn) {
+            this.knowledgeBaseBtn.addEventListener('click', () => this.openKnowledgeModal());
+        }
+        if (this.closeKbBtn) {
+            this.closeKbBtn.addEventListener('click', () => this.closeKnowledgeModal());
+        }
+        if (this.refreshKbBtn) {
+            this.refreshKbBtn.addEventListener('click', () => this.loadKnowledgeDocuments());
+        }
+        if (this.kbSearchInput) {
+            this.kbSearchInput.addEventListener('input', (e) => this.filterKnowledgeDocuments(e.target.value));
+        }
+        if (this.closePreviewBtn) {
+            this.closePreviewBtn.addEventListener('click', () => {
+                if (this.previewModal) this.previewModal.style.display = 'none';
+            });
         }
         
         // AI Ops按钮
@@ -978,7 +1017,7 @@ class SuperBizAgentApp {
         if (file) {
             // 验证文件格式
             if (!this.validateFileType(file)) {
-                this.showNotification('只支持上传 TXT 或 Markdown (.md) 格式的文件', 'error');
+                this.showNotification('支持上传 TXT、Markdown、PDF、Word (.docx)、Excel (.xlsx) 等格式文件', 'error');
                 this.fileInput.value = '';
                 return;
             }
@@ -989,7 +1028,7 @@ class SuperBizAgentApp {
     // 验证文件类型
     validateFileType(file) {
         const fileName = file.name.toLowerCase();
-        const allowedExtensions = ['.txt', '.md', '.markdown'];
+        const allowedExtensions = ['.txt', '.md', '.markdown', '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt'];
         return allowedExtensions.some(ext => fileName.endsWith(ext));
     }
 
@@ -1039,7 +1078,7 @@ class SuperBizAgentApp {
     async uploadFile(file) {
         // 再次验证文件类型（双重保险）
         if (!this.validateFileType(file)) {
-            this.showNotification('只支持上传 TXT 或 Markdown (.md) 格式的文件', 'error');
+            this.showNotification('支持上传 TXT、Markdown、PDF、Word (.docx)、Excel (.xlsx) 等格式文件', 'error');
             return;
         }
 
@@ -1433,6 +1472,149 @@ class SuperBizAgentApp {
                 // 恢复页面滚动
                 document.body.style.overflow = '';
             }
+        }
+    }
+
+    // 打开知识库管理抽屉
+    openKnowledgeModal() {
+        if (this.knowledgeModal) {
+            this.knowledgeModal.style.display = 'flex';
+            this.loadKnowledgeDocuments();
+        }
+    }
+
+    // 关闭知识库管理抽屉
+    closeKnowledgeModal() {
+        if (this.knowledgeModal) {
+            this.knowledgeModal.style.display = 'none';
+        }
+    }
+
+    // 从后端拉取已上传文档列表
+    async loadKnowledgeDocuments() {
+        if (!this.kbTableBody) return;
+        this.kbTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #5f6368; padding: 24px;">加载中...</td></tr>';
+        
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/documents/list`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            
+            const docs = data.data?.items || [];
+            this.cachedDocuments = docs;
+            this.renderKnowledgeDocuments(docs);
+        } catch (err) {
+            console.error('获取知识库文档列表失败:', err);
+            this.kbTableBody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #d93025; padding: 24px;">获取失败: ${err.message}</td></tr>`;
+        }
+    }
+
+    // 渲染文档列表表格
+    renderKnowledgeDocuments(docs) {
+        if (!this.kbTableBody) return;
+        if (this.kbDocCount) {
+            this.kbDocCount.textContent = `共 ${docs.length} 篇文档`;
+        }
+
+        if (docs.length === 0) {
+            this.kbTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #5f6368; padding: 24px;">知识库暂无文档，请通过左侧或输入框下方上传</td></tr>';
+            return;
+        }
+
+        this.kbTableBody.innerHTML = docs.map(doc => {
+            return `
+                <tr>
+                    <td style="font-weight: 500;">
+                        📄 ${this.escapeHtml(doc.fileName)}
+                        <div style="font-size: 11px; color: #80868b; font-family: monospace;">MD5: ${doc.fileMd5}</div>
+                    </td>
+                    <td>${this.formatFileSize(doc.fileSize)}</td>
+                    <td style="color: #5f6368;">${doc.lastModified || '-'}</td>
+                    <td style="text-align: right;">
+                        <button class="kb-op-btn kb-op-btn-preview" onclick="window.app.previewDocument('${doc.fileMd5}', '${this.escapeHtml(doc.fileName)}')">预览</button>
+                        <button class="kb-op-btn kb-op-btn-dl" onclick="window.app.downloadDocument('${doc.fileMd5}', '${this.escapeHtml(doc.fileName)}')">下载</button>
+                        <button class="kb-op-btn kb-op-btn-del" onclick="window.app.deleteDocument('${doc.fileMd5}', '${this.escapeHtml(doc.fileName)}')">删除</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // 搜索过滤知识库文档
+    filterKnowledgeDocuments(query) {
+        if (!this.cachedDocuments) return;
+        const q = (query || '').toLowerCase().trim();
+        if (!q) {
+            this.renderKnowledgeDocuments(this.cachedDocuments);
+            return;
+        }
+        const filtered = this.cachedDocuments.filter(d => 
+            d.fileName.toLowerCase().includes(q) || d.fileMd5.toLowerCase().includes(q)
+        );
+        this.renderKnowledgeDocuments(filtered);
+    }
+
+    // 在线预览文档
+    async previewDocument(fileMd5, fileName) {
+        if (!this.previewModal) return;
+        this.previewDocTitle.textContent = `预览: ${fileName}`;
+        this.previewDocContent.textContent = '正在读取文档内容...';
+        this.previewModal.style.display = 'flex';
+
+        try {
+            const url = `${this.apiBaseUrl}/documents/preview?fileMd5=${encodeURIComponent(fileMd5)}&fileName=${encodeURIComponent(fileName)}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this.previewDocContent.textContent = data.data?.content || '(文档内容为空或不可预览)';
+        } catch (err) {
+            this.previewDocContent.textContent = `读取预览失败: ${err.message}`;
+        }
+    }
+
+    // 预签名安全下载文档
+    async downloadDocument(fileMd5, fileName) {
+        try {
+            const url = `${this.apiBaseUrl}/documents/download?fileMd5=${encodeURIComponent(fileMd5)}&fileName=${encodeURIComponent(fileName)}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const downloadUrl = data.data?.downloadUrl;
+            if (downloadUrl) {
+                window.open(downloadUrl, '_blank');
+            } else {
+                throw new Error('未返回下载链接');
+            }
+        } catch (err) {
+            this.showNotification(`下载失败: ${err.message}`, 'error');
+        }
+    }
+
+    // 级联物理删除文档
+    async deleteDocument(fileMd5, fileName) {
+        if (!confirm(`确定要从知识库中彻底删除【${fileName}】吗？\n该操作将同时清理 MinIO 原文件及 Milvus 中的所有向量切片索引！`)) {
+            return;
+        }
+
+        try {
+            const res = await fetch(`${this.apiBaseUrl}/documents/${encodeURIComponent(fileMd5)}`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this.showNotification(data.data?.message || '文档已成功级联删除', 'success');
+            this.loadKnowledgeDocuments();
+        } catch (err) {
+            this.showNotification(`删除失败: ${err.message}`, 'error');
+        }
+    }
+
+    // 点击出处角标快速预览对应文档
+    highlightSourceDoc(fileName) {
+        this.openKnowledgeModal();
+        if (this.kbSearchInput) {
+            this.kbSearchInput.value = fileName;
+            this.filterKnowledgeDocuments(fileName);
         }
     }
 }
