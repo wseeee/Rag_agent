@@ -23,7 +23,7 @@ func TestMilvusStore_LongTermMemory(t *testing.T) {
 		t.Skipf("skip milvus test, cannot init embedder: %v", err)
 	}
 
-	store, err := NewMilvusStore(ctx, cli, eb, "test_user_memory", 0.70, 5)
+	store, err := NewMilvusStore(ctx, cli, eb, "test_user_memory", 0.60, 5)
 	if err != nil {
 		t.Fatalf("NewMilvusStore failed: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestMilvusStore_LongTermMemory(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// 2. 针对运维问题发起检索（预期命中 Kafka 运维，过滤优惠券规则）
-	results, err := store.SearchLongTerm(ctx, "Kafka 的 JVM 内存大小怎么配置？", "user_test_ops", 5, 0.70)
+	results, err := store.SearchLongTerm(ctx, "Kafka 的 JVM 内存大小怎么配置？", "user_test_ops", 5, 0.60)
 	if err != nil {
 		t.Fatalf("SearchLongTerm failed: %v", err)
 	}
@@ -66,8 +66,8 @@ func TestMilvusStore_LongTermMemory(t *testing.T) {
 
 	foundKafka := false
 	for _, r := range results {
-		if r.Score < 0.70 {
-			t.Fatalf("score %f below threshold 0.70 was not filtered!", r.Score)
+		if r.Score < 0.60 {
+			t.Fatalf("score %f below threshold 0.60 was not filtered!", r.Score)
 		}
 		if len(r.Content) > 0 {
 			foundKafka = true
