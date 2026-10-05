@@ -21,8 +21,12 @@ secret.yaml
 secrets.yaml
 
 # ==========================================
-# 本地运行数据与 Docker 卷持久化
+# 本地运行数据、日志与临时文件
 # ==========================================
+*.log
+logs/
+**/logs/
+*.tmp
 etc/docker/volumes/
 **/volumes/
 etc/output/

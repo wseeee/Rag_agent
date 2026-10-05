@@ -92,7 +92,7 @@ func (s *MinioStorage) ComposeChunks(ctx context.Context, fileMD5, fileName stri
 
 	const minPartSize = 5 * 1024 * 1024 // 5MB
 	if part0Info.Size >= minPartSize {
-		// 分片 >= 5MB 时使用 S3 原生服务端 ComposeObject (极速合并)
+		// 分片 >= 5MB 时使用 S3 服务端 ComposeObject 进行原子合并
 		srcs := make([]minio.CopySrcOptions, totalChunks)
 		for i := 0; i < totalChunks; i++ {
 			srcs[i] = minio.CopySrcOptions{

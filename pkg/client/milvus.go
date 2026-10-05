@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -13,25 +12,10 @@ import (
 
 // NewMilvusClient 初始化或获取 Milvus 2.5 原生客户端，并确保存储 Collection 具备内置 BM25 Function 与稀疏索引
 func NewMilvusClient(ctx context.Context) (*milvusclient.Client, error) {
-	addr := cfg.DefaultMilvusAddr
-	if v, _ := g.Cfg().Get(ctx, "milvus.addr"); !v.IsEmpty() {
-		addr = v.String()
-	}
-
-	defaultDB := cfg.DefaultMilvusDefaultDB
-	if v, _ := g.Cfg().Get(ctx, "milvus.default_db"); !v.IsEmpty() {
-		defaultDB = v.String()
-	}
-
-	dbName := cfg.MilvusDBName
-	if v, _ := g.Cfg().Get(ctx, "milvus.db_name"); !v.IsEmpty() {
-		dbName = v.String()
-	}
-
-	collectionName := cfg.MilvusCollectionName
-	if v, _ := g.Cfg().Get(ctx, "milvus.collection_name"); !v.IsEmpty() {
-		collectionName = v.String()
-	}
+	addr := cfg.C.Milvus.Addr
+	defaultDB := cfg.C.Milvus.DefaultDB
+	dbName := cfg.C.Milvus.DBName
+	collectionName := cfg.C.Milvus.CollectionName
 
 	// 1. 先连接 default 库
 	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{

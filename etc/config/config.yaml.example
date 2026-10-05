@@ -65,4 +65,26 @@ retriever:
   dense_weight: 0.7
   bm25_weight: 0.3
 
+# MySQL 事实真理源配置
+mysql:
+  dsn: "root:password@tcp(127.0.0.1:3307)/superbiz_agent?charset=utf8mb4&parseTime=True&loc=Local"
+  max_idle_conns: 10
+  max_open_conns: 50
 
+# 上下文工程三层记忆系统参数
+memory:
+  short_term_window: 10         # 最近保留对话轮次
+  summary_trigger_turns: 10     # 触发增量摘要轮次
+  ttl_days: 7                   # Redis 缓存保留天数
+  long_term_threshold: 0.70     # Milvus 长期记忆 Cosine 相似度阈值
+  top_k: 5                      # 长期记忆召回条数
+  milvus_collection: "user_memory" # Milvus 长期记忆集合名
+
+# Sentry 错误追踪与智能体诊断配置
+sentry:
+  dsn: "https://your-dsn@o0.ingest.sentry.io/0"
+  auth_token: "your-sentry-auth-token"
+  org: "your-sentry-org"
+  project: "your-sentry-project"
+  base_url: "https://sentry.io"
+  traces_sample_rate: 1.0

@@ -30,6 +30,8 @@ func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewMysqlCrudTool())
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewGetCurrentTimeTool())
 	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewQueryInternalDocsTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewQuerySentryIssuesTool())
+	config.ToolsConfig.Tools = append(config.ToolsConfig.Tools, tools.NewGetSentryIssueDetailTool())
 
 	ins, err := react.NewAgent(ctx, config)
 	if err != nil {

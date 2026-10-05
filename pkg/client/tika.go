@@ -1,4 +1,4 @@
-package tika
+package client
 
 import (
 	"context"
@@ -9,13 +9,15 @@ import (
 	"time"
 )
 
-type Client struct {
+// TikaClient 封装 Apache Tika 文本提取 HTTP 客户端
+type TikaClient struct {
 	endpoint   string
 	httpClient *http.Client
 }
 
-func NewClient(endpoint string) *Client {
-	return &Client{
+// NewTikaClient 初始化 Tika 客户端实例
+func NewTikaClient(endpoint string) *TikaClient {
+	return &TikaClient{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
@@ -24,7 +26,7 @@ func NewClient(endpoint string) *Client {
 }
 
 // ExtractText 将二进制文件流发送给 Tika 抽取为纯文本（原生支持 PDF, Word, Excel, PPT 等富媒体格式）
-func (c *Client) ExtractText(ctx context.Context, reader io.Reader, fileName string) (string, error) {
+func (c *TikaClient) ExtractText(ctx context.Context, reader io.Reader, fileName string) (string, error) {
 	url := fmt.Sprintf("%s/tika", c.endpoint)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, reader)
 	if err != nil {

@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/cloudwego/eino/components/indexer"
 	"github.com/cloudwego/eino/schema"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -32,10 +31,7 @@ func NewMilvusIndexer(ctx context.Context) (indexer.Indexer, error) {
 	if err != nil {
 		return nil, err
 	}
-	collection := cfg.MilvusCollectionName
-	if v, _ := g.Cfg().Get(ctx, "milvus.collection_name"); !v.IsEmpty() {
-		collection = v.String()
-	}
+	collection := cfg.C.Milvus.CollectionName
 	return &milvusNativeIndexer{
 		cli:        cli,
 		collection: collection,

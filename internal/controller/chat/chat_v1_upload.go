@@ -2,14 +2,16 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"SuperBizAgent/api/chat/v1"
-	"SuperBizAgent/pkg/kafka"
+	"SuperBizAgent/pkg/client"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/segmentio/kafka-go"
 )
 
 // UploadCheck 检查文件秒传状态与分片上传进度
@@ -76,7 +78,7 @@ func (c *ControllerV1) UploadChunk(ctx context.Context, req *v1.UploadChunkReq) 
 
 // UploadMerge 校验所有分片完整性，执行 MinIO 按照 MD5 合并分片，并异步投递 Kafka 任务
 func (c *ControllerV1) UploadMerge(ctx context.Context, req *v1.UploadMergeReq) (res *v1.UploadMergeRes, err error) {
-	if c.minioStorage == nil || c.bitmapManager == nil || c.kafkaProducer == nil {
+	if c.minioStorage == nil || c.bitmapManager == nil || c.kafkaWriter == nil {
 		return nil, gerror.New("服务组件未就绪")
 	}
 
@@ -101,7 +103,7 @@ func (c *ControllerV1) UploadMerge(ctx context.Context, req *v1.UploadMergeReq) 
 
 	// 4. 组装异步任务载荷并投递至 Kafka
 	taskID := fmt.Sprintf("task_%s_%d", req.FileMD5, time.Now().UnixNano())
-	task := kafka.FileProcessingTask{
+	task := client.FileProcessingTask{
 		TaskID:         taskID,
 		FileMD5:        req.FileMD5,
 		FileName:       req.FileName,
@@ -111,8 +113,19 @@ func (c *ControllerV1) UploadMerge(ctx context.Context, req *v1.UploadMergeReq) 
 		CreatedAt:      time.Now().UnixMilli(),
 	}
 
-	if err := c.kafkaProducer.SendTask(ctx, task); err != nil {
-		return nil, gerror.Wrapf(err, "投递 Kafka 向量化任务失败")
+	taskBytes, err := json.Marshal(task)
+	if err != nil {
+		return nil, gerror.Wrapf(err, "序列化 Kafka 任务失败")
+	}
+
+	if c.kafkaWriter != nil {
+		if err := c.kafkaWriter.WriteMessages(ctx, kafka.Message{
+			Key:   []byte(task.FileMD5),
+			Value: taskBytes,
+			Time:  time.Now(),
+		}); err != nil {
+			return nil, gerror.Wrapf(err, "投递 Kafka 向量化任务失败")
+		}
 	}
 
 	return &v1.UploadMergeRes{

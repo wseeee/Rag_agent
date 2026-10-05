@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,32 +11,32 @@ import (
 
 	"SuperBizAgent/internal/ai/agent/knowledge_index_pipeline"
 	"SuperBizAgent/internal/config"
-	pkgKafka "SuperBizAgent/pkg/kafka"
+	"SuperBizAgent/pkg/client"
 	"SuperBizAgent/pkg/storage"
-	"SuperBizAgent/pkg/tika"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/redis/go-redis/v9"
+	"github.com/segmentio/kafka-go"
 )
 
 // IndexingConsumer 负责监听 Kafka 任务队列，异步拉取并索引文档
 type IndexingConsumer struct {
-	consumer     *pkgKafka.TaskConsumer
+	reader       *kafka.Reader
 	minioStorage *storage.MinioStorage
 	redisClient  *redis.Client
-	tikaClient   *tika.Client
+	tikaClient   *client.TikaClient
 }
 
 // NewIndexingConsumer 创建文档索引消费端
 func NewIndexingConsumer(
-	consumer *pkgKafka.TaskConsumer,
+	reader *kafka.Reader,
 	minioStorage *storage.MinioStorage,
 	redisClient *redis.Client,
-	tikaClient *tika.Client,
+	tikaClient *client.TikaClient,
 ) *IndexingConsumer {
 	return &IndexingConsumer{
-		consumer:     consumer,
+		reader:       reader,
 		minioStorage: minioStorage,
 		redisClient:  redisClient,
 		tikaClient:   tikaClient,
@@ -53,7 +54,7 @@ func (c *IndexingConsumer) Start(ctx context.Context) {
 			g.Log().Info(ctx, "[Kafka Consumer] 收到退出信号，停止消费循环")
 			return
 		default:
-			task, msg, err := c.consumer.FetchTask(ctx)
+			msg, err := c.reader.FetchMessage(ctx)
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -63,13 +64,20 @@ func (c *IndexingConsumer) Start(ctx context.Context) {
 				continue
 			}
 
+			var task client.FileProcessingTask
+			if err := json.Unmarshal(msg.Value, &task); err != nil {
+				g.Log().Errorf(ctx, "[Kafka Consumer] 反序列化任务载荷失败: %v", err)
+				_ = c.reader.CommitMessages(ctx, msg)
+				continue
+			}
+
 			g.Log().Infof(ctx, "[Kafka Consumer] 收到文件索引任务: TaskID=%s, FileName=%s, MD5=%s", task.TaskID, task.FileName, task.FileMD5)
 
 			// 执行带指数退避的有限次重试，防止网络瞬断导致任务永久失败
 			const maxRetries = 3
 			var procErr error
 			for attempt := 1; attempt <= maxRetries; attempt++ {
-				procErr = c.processTask(ctx, task)
+				procErr = c.processTask(ctx, &task)
 				if procErr == nil {
 					break
 				}
@@ -88,16 +96,14 @@ func (c *IndexingConsumer) Start(ctx context.Context) {
 				g.Log().Errorf(ctx, "[Kafka Consumer] 任务处理重试耗尽最终失败: TaskID=%s, err=%v", task.TaskID, procErr)
 			}
 
-			if msg != nil {
-				if err := c.consumer.Commit(ctx, *msg); err != nil {
-					g.Log().Warningf(ctx, "[Kafka Consumer] 提交消息 Offset 失败: %v", err)
-				}
+			if err := c.reader.CommitMessages(ctx, msg); err != nil {
+				g.Log().Warningf(ctx, "[Kafka Consumer] 提交消息 Offset 失败: %v", err)
 			}
 		}
 	}
 }
 
-func (c *IndexingConsumer) processTask(ctx context.Context, task *pkgKafka.FileProcessingTask) error {
+func (c *IndexingConsumer) processTask(ctx context.Context, task *client.FileProcessingTask) error {
 	taskKey := fmt.Sprintf("task:%s", task.TaskID)
 
 	// 1. 更新任务状态为 PROCESSING
@@ -161,7 +167,7 @@ func (c *IndexingConsumer) processTask(ctx context.Context, task *pkgKafka.FileP
 		return err
 	}
 
-	// 5. 更新任务状态为 COMPLETED
+	// 6. 更新任务状态为 COMPLETED
 	if c.redisClient != nil {
 		_ = c.redisClient.HSet(ctx, taskKey, map[string]interface{}{
 			"status":       "COMPLETED",
@@ -186,78 +192,33 @@ func (c *IndexingConsumer) markFailed(ctx context.Context, taskKey, errorMsg str
 	}
 }
 
-// Close 优雅释放资源
+// Close 停止消费并释放相关资源
 func (c *IndexingConsumer) Close() error {
-	return c.consumer.Close()
+	if c.reader != nil {
+		return c.reader.Close()
+	}
+	return nil
 }
 
 // InitAndStartConsumer 根据配置快速初始化并启动后台消费监听
 func InitAndStartConsumer(ctx context.Context) (*IndexingConsumer, error) {
 	// Redis
-	redisAddr := config.DefaultRedisAddr
-	if v, _ := g.Cfg().Get(ctx, "redis.addr"); !v.IsEmpty() {
-		redisAddr = v.String()
-	}
-	redisPassword := config.DefaultRedisPassword
-	if v, _ := g.Cfg().Get(ctx, "redis.password"); !v.IsEmpty() {
-		redisPassword = v.String()
-	}
-	redisDB := config.DefaultRedisDB
-	if v, _ := g.Cfg().Get(ctx, "redis.db"); !v.IsEmpty() {
-		redisDB = v.Int()
-	}
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     redisAddr,
-		Password: redisPassword,
-		DB:       redisDB,
-	})
+	rdb := client.GetRedisClient()
 
 	// MinIO
-	minioEndpoint := config.DefaultMinIOEndpoint
-	if v, _ := g.Cfg().Get(ctx, "minio.endpoint"); !v.IsEmpty() {
-		minioEndpoint = v.String()
-	}
-	minioAccessKey := config.DefaultMinIOAccessKey
-	if v, _ := g.Cfg().Get(ctx, "minio.accessKey"); !v.IsEmpty() {
-		minioAccessKey = v.String()
-	}
-	minioSecretKey := config.DefaultMinIOSecretKey
-	if v, _ := g.Cfg().Get(ctx, "minio.secretKey"); !v.IsEmpty() {
-		minioSecretKey = v.String()
-	}
-	minioBucket := config.DefaultMinIOBucket
-	if v, _ := g.Cfg().Get(ctx, "minio.bucket"); !v.IsEmpty() {
-		minioBucket = v.String()
-	}
-	minioUseSSL := false
-	if v, _ := g.Cfg().Get(ctx, "minio.useSSL"); !v.IsEmpty() {
-		minioUseSSL = v.Bool()
-	}
-	ms, err := storage.NewMinioStorage(minioEndpoint, minioAccessKey, minioSecretKey, minioBucket, minioUseSSL)
+	minioCfg := config.C.MinIO
+	ms, err := storage.NewMinioStorage(minioCfg.Endpoint, minioCfg.AccessKey, minioCfg.SecretKey, minioCfg.Bucket, minioCfg.UseSSL)
 	if err != nil {
 		return nil, fmt.Errorf("init minio failed: %w", err)
 	}
 
-	// Kafka
-	kafkaBrokers := []string{config.DefaultKafkaBroker}
-	if v, _ := g.Cfg().Get(ctx, "kafka.brokers"); !v.IsEmpty() {
-		kafkaBrokers = v.Strings()
-	}
-	kafkaTopic := config.DefaultKafkaTopic
-	if v, _ := g.Cfg().Get(ctx, "kafka.topic"); !v.IsEmpty() {
-		kafkaTopic = v.String()
-	}
-	kafkaGroupID := config.DefaultKafkaGroupID
-	if v, _ := g.Cfg().Get(ctx, "kafka.group_id"); !v.IsEmpty() {
-		kafkaGroupID = v.String()
-	}
+	// Kafka Reader
+	reader := client.NewKafkaReader(config.C.Kafka.Brokers, config.C.Kafka.Topic, config.C.Kafka.GroupID)
 
 	// Tika
-	tikaURL := g.Cfg().MustGet(ctx, "tika.server_url").String()
-	tikaClient := tika.NewClient(tikaURL)
+	tikaClient := client.NewTikaClient(config.C.Tika.ServerUrl)
 
-	consumer := pkgKafka.NewTaskConsumer(kafkaBrokers, kafkaTopic, kafkaGroupID)
-	indexingConsumer := NewIndexingConsumer(consumer, ms, rdb, tikaClient)
+	indexingConsumer := NewIndexingConsumer(reader, ms, rdb, tikaClient)
 
 	go indexingConsumer.Start(ctx)
 
