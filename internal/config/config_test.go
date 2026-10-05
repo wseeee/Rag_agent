@@ -54,7 +54,7 @@ func TestConfigLoad(t *testing.T) {
 	if c.DsThinkChatModel.Model != "deepseek-v4.1-flash" {
 		t.Errorf("expected DsThinkChatModel.Model 'deepseek-v4.1-flash', got %q", c.DsThinkChatModel.Model)
 	}
-	if c.DoubaoEmbeddingModel.Model != "text-embedding-v4" {
-		t.Errorf("expected DoubaoEmbeddingModel.Model 'text-embedding-v4', got %q", c.DoubaoEmbeddingModel.Model)
+	if c.DoubaoEmbeddingModel.Model != "qwen3.7-text-embedding" {
+		t.Errorf("expected DoubaoEmbeddingModel.Model 'qwen3.7-text-embedding', got %q", c.DoubaoEmbeddingModel.Model)
 	}
 }

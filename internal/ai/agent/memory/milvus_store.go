@@ -224,13 +224,7 @@ func (m *MilvusStore) SearchLongTerm(
 		sparseReq = sparseReq.WithFilter(expr)
 	}
 
-	denseWeight := cfg.C.Retriever.DenseWeight
-	bm25Weight := cfg.C.Retriever.Bm25Weight
-	if denseWeight == 0 && bm25Weight == 0 {
-		denseWeight = 0.7
-		bm25Weight = 0.3
-	}
-	reranker := milvusclient.NewWeightedReranker([]float64{denseWeight, bm25Weight})
+	reranker := milvusclient.NewWeightedReranker([]float64{cfg.C.Retriever.DenseWeight, cfg.C.Retriever.Bm25Weight})
 	hybridOpt := milvusclient.NewHybridSearchOption(m.collection, topK, denseReq, sparseReq).
 		WithReranker(reranker).
 		WithOutputFields("id", "session_id", "user_id", "content", "created_at")

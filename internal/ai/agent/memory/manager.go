@@ -45,34 +45,11 @@ func GetDefaultMemoryManager() *MemoryManager {
 
 // NewDefaultMemoryManager 从全局配置自动组装三层存储
 func NewDefaultMemoryManager(ctx context.Context) (*MemoryManager, error) {
-	shortTermWindow := cfg.C.Memory.ShortTermWindow
-	if shortTermWindow <= 0 {
-		shortTermWindow = 10
-	}
-	summaryTriggerTurns := cfg.C.Memory.SummaryTriggerTurns
-	if summaryTriggerTurns <= 0 {
-		summaryTriggerTurns = 10
-	}
-	ttlDays := cfg.C.Memory.TTLDays
-	if ttlDays <= 0 {
-		ttlDays = 7
-	}
-	longTermThreshold := cfg.C.Memory.LongTermThreshold
-	if longTermThreshold <= 0 {
-		longTermThreshold = 0.70
-	}
-	topK := cfg.C.Memory.TopK
-	if topK <= 0 {
-		topK = 5
-	}
-	milvusCollection := cfg.C.Memory.MilvusCollection
-	if milvusCollection == "" {
-		milvusCollection = "user_memory"
-	}
+	c := cfg.C.Memory
 
 	// 1. Redis 配置与初始化 (动态计算 2 倍轮次作为消息条数窗口)
 	rdb := client.GetRedisClient()
-	redisStore := NewRedisStore(rdb, time.Duration(ttlDays)*24*time.Hour, shortTermWindow*2)
+	redisStore := NewRedisStore(rdb, time.Duration(c.TTLDays)*24*time.Hour, c.ShortTermWindow*2)
 
 	// 2. Milvus 配置与初始化
 	var milvusStore *MilvusStore
@@ -80,7 +57,7 @@ func NewDefaultMemoryManager(ctx context.Context) (*MemoryManager, error) {
 	if err == nil {
 		eb, ebErr := embedder.DoubaoEmbedding(ctx)
 		if ebErr == nil {
-			milvusStore, err = NewMilvusStore(ctx, milvusCli, eb, milvusCollection, longTermThreshold, topK)
+			milvusStore, err = NewMilvusStore(ctx, milvusCli, eb, c.MilvusCollection, c.LongTermThreshold, c.TopK)
 			if err != nil {
 				g.Log().Warningf(ctx, "[MemoryManager] Milvus 记忆库初始化告警: %v", err)
 			}
@@ -98,12 +75,12 @@ func NewDefaultMemoryManager(ctx context.Context) (*MemoryManager, error) {
 	}
 
 	memCfg := MemoryConfig{
-		ShortTermWindow:     shortTermWindow,
-		SummaryTriggerTurns: summaryTriggerTurns,
-		TTL:                 time.Duration(ttlDays) * 24 * time.Hour,
-		ScoreThreshold:      longTermThreshold,
-		TopK:                topK,
-		MilvusCollection:    milvusCollection,
+		ShortTermWindow:     c.ShortTermWindow,
+		SummaryTriggerTurns: c.SummaryTriggerTurns,
+		TTL:                 time.Duration(c.TTLDays) * 24 * time.Hour,
+		ScoreThreshold:      c.LongTermThreshold,
+		TopK:                c.TopK,
+		MilvusCollection:    c.MilvusCollection,
 	}
 
 	return &MemoryManager{
