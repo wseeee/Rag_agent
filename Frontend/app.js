@@ -2,7 +2,7 @@
 class SuperBizAgentApp {
     constructor() {
         this.apiBaseUrl = 'http://localhost:6872/api';
-        this.currentMode = 'quick'; // 'quick' 或 'stream'
+        this.currentMode = 'stream'; // 默认流式对话模式
         this.sessionId = this.generateSessionId();
         this.isStreaming = false;
         this.currentChatHistory = []; // 当前对话的消息历史
@@ -307,8 +307,8 @@ class SuperBizAgentApp {
         // 生成新的会话ID
         this.sessionId = this.generateSessionId();
         
-        // 重置模式为快速
-        this.currentMode = 'quick';
+        // 重置模式为流式
+        this.currentMode = 'stream';
         this.updateUI();
         
         // 重新设置居中样式（确保对话框居中显示）
@@ -643,7 +643,6 @@ class SuperBizAgentApp {
     // 发送快速消息（普通对话）
     async sendQuickMessage(message) {
         const thinkingState = this.addThinkingMessage('思考中');
-        const startTime = Date.now();
 
         try {
             const response = await fetch(`${this.apiBaseUrl}/chat`, {
@@ -662,9 +661,7 @@ class SuperBizAgentApp {
             }
 
             const data = await response.json();
-            
-            const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-            thinkingState.finish(duration);
+            thinkingState.finish();
 
             if (data.message === 'OK' && data.data && data.data.answer) {
                 thinkingState.messageElement.classList.remove('streaming');
@@ -691,10 +688,9 @@ class SuperBizAgentApp {
         }
     }
 
-    // 发送流式消息
+    // 发送流式消息（核心流式对话）
     async sendStreamMessage(message) {
         const thinkingState = this.addThinkingMessage('思考中');
-        const startTime = Date.now();
         let hasFinishedThinking = false;
 
         try {
@@ -717,40 +713,43 @@ class SuperBizAgentApp {
             const messageContent = thinkingState.messageContent;
             let fullResponse = '';
 
-            // 处理流式响应
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
             let currentEvent = '';
+
+            const finalizeResponse = () => {
+                if (!hasFinishedThinking) {
+                    hasFinishedThinking = true;
+                    thinkingState.finish();
+                }
+                if (assistantMessageElement) {
+                    assistantMessageElement.classList.remove('streaming');
+                }
+                if (messageContent) {
+                    messageContent.innerHTML = this.renderMarkdown(fullResponse);
+                    this.highlightCodeBlocks(messageContent);
+                }
+                if (fullResponse) {
+                    this.currentChatHistory.push({
+                        type: 'assistant',
+                        content: fullResponse,
+                        timestamp: new Date().toISOString()
+                    });
+                    if (this.isCurrentChatFromHistory) {
+                        this.updateCurrentChatHistory();
+                        this.renderChatHistory();
+                    }
+                }
+                this.scrollToBottom();
+            };
 
             try {
                 while (true) {
                     const { done, value } = await reader.read();
                     
                     if (done) {
-                        if (!hasFinishedThinking) {
-                            hasFinishedThinking = true;
-                            const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-                            thinkingState.finish(duration);
-                        }
-                        if (assistantMessageElement) {
-                            assistantMessageElement.classList.remove('streaming');
-                            if (messageContent) {
-                                messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                this.highlightCodeBlocks(messageContent);
-                            }
-                        }
-                        if (fullResponse) {
-                            this.currentChatHistory.push({
-                                type: 'assistant',
-                                content: fullResponse,
-                                timestamp: new Date().toISOString()
-                            });
-                            if (this.isCurrentChatFromHistory) {
-                                this.updateCurrentChatHistory();
-                                this.renderChatHistory();
-                            }
-                        }
+                        finalizeResponse();
                         break;
                     }
 
@@ -766,58 +765,14 @@ class SuperBizAgentApp {
                         } else if (line.startsWith('event: ')) {
                             currentEvent = line.substring(7);
                             if (currentEvent === 'done') {
-                                if (!hasFinishedThinking) {
-                                    hasFinishedThinking = true;
-                                    const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-                                    thinkingState.finish(duration);
-                                }
-                                if (assistantMessageElement) {
-                                    assistantMessageElement.classList.remove('streaming');
-                                    if (messageContent) {
-                                        messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        this.highlightCodeBlocks(messageContent);
-                                    }
-                                }
-                                if (fullResponse) {
-                                    this.currentChatHistory.push({
-                                        type: 'assistant',
-                                        content: fullResponse,
-                                        timestamp: new Date().toISOString()
-                                    });
-                                    if (this.isCurrentChatFromHistory) {
-                                        this.updateCurrentChatHistory();
-                                        this.renderChatHistory();
-                                    }
-                                }
+                                finalizeResponse();
                                 return;
                             }
                             continue;
                         } else if (line.startsWith('data: ')) {
                             const data = line.substring(6);
                             if (data === '[DONE]') {
-                                if (!hasFinishedThinking) {
-                                    hasFinishedThinking = true;
-                                    const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-                                    thinkingState.finish(duration);
-                                }
-                                if (assistantMessageElement) {
-                                    assistantMessageElement.classList.remove('streaming');
-                                    if (messageContent) {
-                                        messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        this.highlightCodeBlocks(messageContent);
-                                    }
-                                }
-                                if (fullResponse) {
-                                    this.currentChatHistory.push({
-                                        type: 'assistant',
-                                        content: fullResponse,
-                                        timestamp: new Date().toISOString()
-                                    });
-                                    if (this.isCurrentChatFromHistory) {
-                                        this.updateCurrentChatHistory();
-                                        this.renderChatHistory();
-                                    }
-                                }
+                                finalizeResponse();
                                 return;
                             }
                             
@@ -835,15 +790,14 @@ class SuperBizAgentApp {
                                 }
 
                                 if (chunkText) {
-                                    // 收到有效内容时平滑结束思考状态
                                     if (!hasFinishedThinking) {
                                         hasFinishedThinking = true;
-                                        const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
-                                        thinkingState.finish(duration);
+                                        thinkingState.finish();
                                     }
                                     fullResponse += chunkText;
                                     if (messageContent) {
-                                        messageContent.textContent = fullResponse;
+                                        // 实时 Markdown 解析渲染 + 打字机微光标
+                                        messageContent.innerHTML = this.renderMarkdown(fullResponse) + '<span class="streaming-cursor"></span>';
                                         this.scrollToBottom();
                                     }
                                 }
@@ -925,8 +879,8 @@ class SuperBizAgentApp {
         return messageDiv;
     }
 
-    // 添加 Agent 深度思考消息组件（支持实时计时、脉冲微光、状态轮询与折叠）
-    addThinkingMessage(title = '思考中', customStatusList = null) {
+    // 添加 Agent 灵动思考加载动效（Gemini / Antigravity Style，高科技极光微光、旋转星芒与律动波柱）
+    addThinkingMessage(title = '思考中') {
         const isFirstMessage = this.chatMessages && this.chatMessages.querySelectorAll('.message').length === 0;
 
         const messageDiv = document.createElement('div');
@@ -945,52 +899,40 @@ class SuperBizAgentApp {
         const messageContentWrapper = document.createElement('div');
         messageContentWrapper.className = 'message-content-wrapper';
 
-        // 深度思考容器
-        const thinkingContainer = document.createElement('div');
-        thinkingContainer.className = 'agent-thinking-container active';
-
-        // 状态提示语轮询列表
-        const statusList = customStatusList || [
-            '正在理解运维需求与排障上下文...',
-            '正在检索内部知识库与运维 SOP 手册...',
-            '正在调取 Sentry 异常监控与 Prometheus 告警指标...',
-            '正在推断故障根因并组织结构化诊断方案...'
-        ];
-        let statusIndex = 0;
-
-        thinkingContainer.innerHTML = `
-            <div class="agent-thinking-header">
-                <div class="agent-thinking-icon">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z" fill="url(#sparkleGradientThinking)"/>
-                        <circle cx="19" cy="5" r="2" fill="#34A853"/>
-                        <circle cx="5" cy="19" r="1.5" fill="#4285F4"/>
-                        <defs>
-                            <linearGradient id="sparkleGradientThinking" x1="4" y1="2" x2="20" y2="18" gradientUnits="userSpaceOnUse">
-                                <stop stop-color="#4285F4"/>
-                                <stop offset="0.5" stop-color="#9B72CB"/>
-                                <stop offset="1" stop-color="#EA4335"/>
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                </div>
-                <div class="agent-thinking-title">
-                    <span class="thinking-text">${title}</span>
-                    <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
-                    <span class="thinking-timer">0s</span>
+        // 灵动思考气泡胶囊
+        const thinkingBox = document.createElement('div');
+        thinkingBox.className = 'agent-thinking-box';
+        thinkingBox.innerHTML = `
+            <div class="thinking-sparkle-glow">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z" fill="url(#geminiSparkleGrad)"/>
+                    <defs>
+                        <linearGradient id="geminiSparkleGrad" x1="4" y1="2" x2="20" y2="18" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#4285F4"/>
+                            <stop offset="0.5" stop-color="#9B72CB"/>
+                            <stop offset="1" stop-color="#34A853"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <div class="thinking-info">
+                <span class="thinking-label">${this.escapeHtml(title)}</span>
+                <div class="thinking-wave-bars">
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
                 </div>
             </div>
-            <div class="agent-thinking-detail">
-                <div class="thinking-shimmer-bar"></div>
-                <span class="thinking-status-text">${statusList[0]}</span>
-            </div>
+            <span class="thinking-timer">0s</span>
         `;
 
-        // 真实文本内容容器（初始为空）
+        // 真实文本内容容器（初始隐藏，首个 chunk 到达后展开）
         const messageContent = document.createElement('div');
         messageContent.className = 'message-content';
+        messageContent.style.display = 'none';
 
-        messageContentWrapper.appendChild(thinkingContainer);
+        messageContentWrapper.appendChild(thinkingBox);
         messageContentWrapper.appendChild(messageContent);
         messageDiv.appendChild(messageContentWrapper);
 
@@ -1003,96 +945,32 @@ class SuperBizAgentApp {
             this.scrollToBottom();
         }
 
-        // 计时器与状态文案循环
         const startTime = Date.now();
-        const timerEl = thinkingContainer.querySelector('.thinking-timer');
-        const statusEl = thinkingContainer.querySelector('.thinking-status-text');
-
+        const timerEl = thinkingBox.querySelector('.thinking-timer');
         const timerInterval = setInterval(() => {
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
             if (timerEl) timerEl.textContent = `${elapsed}s`;
         }, 1000);
 
-        const statusInterval = setInterval(() => {
-            if (statusList.length > 1 && statusEl) {
-                statusIndex = (statusIndex + 1) % statusList.length;
-                statusEl.style.opacity = '0';
-                setTimeout(() => {
-                    if (statusEl) {
-                        statusEl.textContent = statusList[statusIndex];
-                        statusEl.style.opacity = '1';
-                    }
-                }, 200);
-            }
-        }, 2400);
+        let finished = false;
 
         return {
             messageElement: messageDiv,
-            thinkingContainer: thinkingContainer,
+            thinkingContainer: thinkingBox,
             messageContent: messageContent,
-            finish: (durationSec) => {
+            finish: () => {
+                if (finished) return;
+                finished = true;
                 clearInterval(timerInterval);
-                clearInterval(statusInterval);
-                
-                const finalDuration = durationSec || Math.max(1, Math.round((Date.now() - startTime) / 1000));
-                thinkingContainer.classList.remove('active');
-                thinkingContainer.classList.add('completed', 'collapsed');
-
-                // 移除过渡期 detail
-                const detailEl = thinkingContainer.querySelector('.agent-thinking-detail');
-                if (detailEl) detailEl.remove();
-
-                // 更新头部图标为精致绿色勾选图标
-                const iconEl = thinkingContainer.querySelector('.agent-thinking-icon');
-                if (iconEl) {
-                    iconEl.innerHTML = `
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#34A853" stroke-width="2.5">
-                            <path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    `;
-                }
-
-                const titleEl = thinkingContainer.querySelector('.agent-thinking-title');
-                if (titleEl) {
-                    titleEl.innerHTML = `<span class="thinking-text">已深度思考 (${finalDuration} 秒)</span>`;
-                }
-
-                // 添加展开折叠按钮
-                const headerEl = thinkingContainer.querySelector('.agent-thinking-header');
-                if (headerEl) {
-                    const toggleEl = document.createElement('div');
-                    toggleEl.className = 'agent-thinking-toggle';
-                    toggleEl.innerHTML = `
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    `;
-                    headerEl.appendChild(toggleEl);
-
-                    headerEl.onclick = () => {
-                        thinkingContainer.classList.toggle('collapsed');
-                    };
-                }
-
-                // 添加折叠详情内容
-                const detailContent = document.createElement('div');
-                detailContent.className = 'agent-thinking-detail-content';
-                detailContent.innerHTML = `
-                    <div class="thinking-summary-tags">
-                        <span class="thinking-tag">⚡ 智能 Agent 链路</span>
-                        <span class="thinking-tag">📚 运维知识库关联</span>
-                        <span class="thinking-tag">🛠️ 监控告警与堆栈检索</span>
-                    </div>
-                    <div class="thinking-log-preview">
-                        Agent 已完成思考分析与工具执行，以下为解答：
-                    </div>
-                `;
-                thinkingContainer.appendChild(detailContent);
+                messageContent.style.display = 'block';
+                thinkingBox.classList.add('fading');
+                setTimeout(() => {
+                    thinkingBox.remove();
+                }, 300);
             },
             stop: () => {
                 clearInterval(timerInterval);
-                clearInterval(statusInterval);
-                thinkingContainer.remove();
+                thinkingBox.remove();
             }
         };
     }
@@ -1465,10 +1343,11 @@ class SuperBizAgentApp {
         messageContent.textContent = '';
         
         // 移除思考组件或加载图标
-        const thinkingContainer = messageElement.querySelector('.agent-thinking-container');
+        const thinkingContainer = messageElement.querySelector('.agent-thinking-box, .agent-thinking-container');
         if (thinkingContainer) {
             thinkingContainer.remove();
         }
+        messageContent.style.display = 'block';
         const loadingIcon = messageContent.querySelector('.loading-spinner-icon');
         if (loadingIcon) {
             loadingIcon.remove();
@@ -1620,14 +1499,8 @@ class SuperBizAgentApp {
         // 新建对话
         this.newChat();
         
-        // 使用 Agent 深度思考组件
-        const thinkingState = this.addThinkingMessage('智能运维分析中', [
-            '正在启动运维 Agent 规划器 (Planner)...',
-            '正在检索 Prometheus 活跃告警清单...',
-            '正在查询 Sentry 未解决异常与完整错误调用栈...',
-            '正在匹配内部知识库故障处理 SOP 与标准方案...',
-            '正在推断故障根因并生成结构化诊断报告...'
-        ]);
+        // 使用 Agent 灵动思考加载动效
+        const thinkingState = this.addThinkingMessage('智能运维分析中');
         const startTime = Date.now();
         this.currentAIOpsMessage = thinkingState.messageElement;
         
