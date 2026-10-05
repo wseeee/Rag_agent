@@ -10,9 +10,8 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-// GetCurrentTimeInput 获取当前时间的输入参数（无需输入）
+// GetCurrentTimeInput 获取当前时间的输入参数（无需额外字段）
 type GetCurrentTimeInput struct {
-	// 无需输入参数
 }
 
 // GetCurrentTimeOutput 获取当前时间的输出结果

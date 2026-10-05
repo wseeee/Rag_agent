@@ -3,21 +3,19 @@ package chat
 import (
 	"SuperBizAgent/api/chat/v1"
 	"SuperBizAgent/internal/ai/agent/chat_pipeline"
+	"SuperBizAgent/internal/ai/agent/memory"
 	"SuperBizAgent/pkg/log_call_back"
-	"SuperBizAgent/pkg/mem"
 	"context"
 	"errors"
 	"io"
 	"strings"
 
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/schema"
 	"github.com/gogf/gf/v2/frame/g"
 )
 
 func (c *ControllerV1) ChatStream(ctx context.Context, req *v1.ChatStreamReq) (res *v1.ChatStreamRes, err error) {
-	id := req.Id
-	msg := req.Question
+	id, msg := req.Id, req.Question
 
 	ctx = context.WithValue(ctx, "client_id", req.Id)
 	client, err := c.service.Create(ctx, g.RequestFromCtx(ctx))
@@ -25,10 +23,12 @@ func (c *ControllerV1) ChatStream(ctx context.Context, req *v1.ChatStreamReq) (r
 		return nil, err
 	}
 
+	userID := getUserID(ctx)
+	memMgr := memory.GetDefaultMemoryManager()
 	userMessage := &chat_pipeline.UserMessage{
 		ID:      id,
 		Query:   msg,
-		History: mem.GetSimpleMemory(id).GetMessages(),
+		History: memMgr.GetHistory(ctx, id, userID, msg),
 	}
 
 	runner, err := chat_pipeline.BuildChatAgent(ctx)
@@ -40,12 +40,10 @@ func (c *ControllerV1) ChatStream(ctx context.Context, req *v1.ChatStreamReq) (r
 	defer sr.Close()
 
 	var fullResponse strings.Builder
-
 	defer func() {
 		completeResponse := fullResponse.String()
-		if completeResponse != "" {
-			mem.GetSimpleMemory(id).SetMessages(schema.UserMessage(msg))
-			mem.GetSimpleMemory(id).SetMessages(schema.SystemMessage(completeResponse))
+		if completeResponse != "" && memMgr != nil {
+			memMgr.RecordInteractionAsync(id, userID, msg, completeResponse, 0, 0, "")
 		}
 	}()
 

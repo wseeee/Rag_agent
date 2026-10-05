@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/schema"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
@@ -36,33 +35,13 @@ func NewMilvusRetriever(ctx context.Context) (retriever.Retriever, error) {
 		return nil, fmt.Errorf("init embedding failed: %w", err)
 	}
 
-	topK := 8
-	if v, _ := g.Cfg().Get(ctx, "retriever.top_k"); !v.IsEmpty() {
-		topK = v.Int()
-	}
-
-	denseWeight := 0.7
-	if v, _ := g.Cfg().Get(ctx, "retriever.dense_weight"); !v.IsEmpty() {
-		denseWeight = v.Float64()
-	}
-
-	bm25Weight := 0.3
-	if v, _ := g.Cfg().Get(ctx, "retriever.bm25_weight"); !v.IsEmpty() {
-		bm25Weight = v.Float64()
-	}
-
-	collection := cfg.MilvusCollectionName
-	if v, _ := g.Cfg().Get(ctx, "milvus.collection_name"); !v.IsEmpty() {
-		collection = v.String()
-	}
-
 	return &hybridMilvusRetriever{
 		cli:         cli,
-		collection:  collection,
+		collection:  cfg.C.Milvus.CollectionName,
 		eb:          eb,
-		topK:        topK,
-		denseWeight: denseWeight,
-		bm25Weight:  bm25Weight,
+		topK:        cfg.C.Retriever.TopK,
+		denseWeight: cfg.C.Retriever.DenseWeight,
+		bm25Weight:  cfg.C.Retriever.Bm25Weight,
 	}, nil
 }
 

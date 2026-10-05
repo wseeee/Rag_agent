@@ -12,7 +12,6 @@ import (
 
 	"github.com/cloudwego/eino/components/document"
 	"github.com/cloudwego/eino/compose"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -48,10 +47,7 @@ func DeleteDocumentVectors(ctx context.Context, identifier string) error {
 		return fmt.Errorf("init milvus client failed: %w", err)
 	}
 
-	collectionName := config.MilvusCollectionName
-	if v, _ := g.Cfg().Get(ctx, "milvus.collection_name"); !v.IsEmpty() {
-		collectionName = v.String()
-	}
+	collectionName := config.C.Milvus.CollectionName
 
 	cleanIdent := filepath.ToSlash(identifier)
 	expr := fmt.Sprintf(`metadata["_source"] like "%%%s%%"`, cleanIdent)

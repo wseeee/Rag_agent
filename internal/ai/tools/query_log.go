@@ -1,11 +1,11 @@
 package tools
 
 import (
+	"SuperBizAgent/internal/config"
 	"context"
 
 	e_mcp "github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/gogf/gf/v2/frame/g"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -21,12 +21,9 @@ https://mcp-go.dev/clients
 */
 func GetLogMcpTool() ([]tool.BaseTool, error) {
 	// https://mcp-api.tencent-cloud.com/sse/XXXX
-	mcpUrl, err := g.Cfg().Get(context.Background(), "mcp_url")
-	if err != nil {
-		return nil, err
-	}
+	mcpUrl := config.C.McpUrl
 	ctx := context.Background()
-	cli, err := client.NewSSEMCPClient(mcpUrl.String())
+	cli, err := client.NewSSEMCPClient(mcpUrl)
 	if err != nil {
 		return []tool.BaseTool{}, err
 	}

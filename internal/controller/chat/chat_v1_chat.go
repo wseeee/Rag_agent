@@ -3,21 +3,22 @@ package chat
 import (
 	"SuperBizAgent/api/chat/v1"
 	"SuperBizAgent/internal/ai/agent/chat_pipeline"
+	"SuperBizAgent/internal/ai/agent/memory"
 	"SuperBizAgent/pkg/log_call_back"
-	"SuperBizAgent/pkg/mem"
 	"context"
 
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/schema"
 )
 
 func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (res *v1.ChatRes, err error) {
-	id := req.Id
-	msg := req.Question
+	id, msg := req.Id, req.Question
+	userID := getUserID(ctx)
+
+	memMgr := memory.GetDefaultMemoryManager()
 	userMessage := &chat_pipeline.UserMessage{
 		ID:      id,
 		Query:   msg,
-		History: mem.GetSimpleMemory(id).GetMessages(),
+		History: memMgr.GetHistory(ctx, id, userID, msg),
 	}
 
 	runner, err := chat_pipeline.BuildChatAgent(ctx)
@@ -29,11 +30,10 @@ func (c *ControllerV1) Chat(ctx context.Context, req *v1.ChatReq) (res *v1.ChatR
 	if err != nil {
 		return nil, err
 	}
-	res = &v1.ChatRes{
-		Answer: out.Content,
-	}
-	mem.GetSimpleMemory(id).SetMessages(schema.UserMessage(msg))
-	mem.GetSimpleMemory(id).SetMessages(schema.SystemMessage(out.Content))
 
-	return res, nil
+	if memMgr != nil {
+		memMgr.RecordInteractionAsync(id, userID, msg, out.Content, 0, 0, "")
+	}
+
+	return &v1.ChatRes{Answer: out.Content}, nil
 }

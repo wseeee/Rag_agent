@@ -1,36 +1,25 @@
 package main
 
 import (
+	"SuperBizAgent/internal/config"
 	tools2 "SuperBizAgent/internal/ai/tools"
-	_ "SuperBizAgent/internal/config"
 	"context"
 	"fmt"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"github.com/gogf/gf/v2/frame/g"
 )
 
 func main() {
 	ctx := context.Background()
-	// 从 config.yaml 中读取 ChatModel 配置 (优先 volc_chat_model，回退 ds_think_chat_model)
-	modelName, _ := g.Cfg().Get(ctx, "volc_chat_model.model")
-	apiKey, _ := g.Cfg().Get(ctx, "volc_chat_model.api_key")
-	baseURL, _ := g.Cfg().Get(ctx, "volc_chat_model.base_url")
-
-	if apiKey.IsEmpty() {
-		modelName, _ = g.Cfg().Get(ctx, "ds_think_chat_model.model")
-		apiKey, _ = g.Cfg().Get(ctx, "ds_think_chat_model.api_key")
-		baseURL, _ = g.Cfg().Get(ctx, "ds_think_chat_model.base_url")
+	conf := config.C.DsThinkChatModel
+	chatModelConfig := &openai.ChatModelConfig{
+		APIKey:  conf.ApiKey,
+		Model:   conf.Model,
+		BaseURL: conf.BaseUrl,
 	}
-
-	config := &openai.ChatModelConfig{
-		APIKey:  apiKey.String(),
-		Model:   modelName.String(),
-		BaseURL: baseURL.String(),
-	}
-	chatModel, err := openai.NewChatModel(ctx, config)
+	chatModel, err := openai.NewChatModel(ctx, chatModelConfig)
 	if err != nil {
 		panic(err)
 	}
