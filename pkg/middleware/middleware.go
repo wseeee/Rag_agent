@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -60,6 +61,9 @@ func ResponseMiddleware(r *ghttp.Request) {
 	} else {
 		span.Status = sentry.SpanStatusOK
 		msg = "OK"
+	}
+	if strings.Contains(r.Response.Header().Get("Content-Type"), "text/event-stream") {
+		return
 	}
 	r.Response.WriteJson(Response{
 		TraceID: traceID,
