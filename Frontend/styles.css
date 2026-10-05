@@ -581,7 +581,7 @@ body {
     51%, 100% { opacity: 0; }
 }
 
-/* 加载消息样式 */
+/* 加载与思考消息样式 */
 .loading-message-content {
     display: flex;
     align-items: center;
@@ -601,6 +601,197 @@ body {
     to {
         transform: rotate(360deg);
     }
+}
+
+/* ============================================================
+   Agent 深度思考 (Thinking) 加载与折叠组件样式
+   ============================================================ */
+
+.agent-thinking-container {
+    background: #f8fafd;
+    border: 1px solid #e1e9f8;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    color: #444746;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.agent-thinking-container.active {
+    background: linear-gradient(135deg, #f4f8fe 0%, #fdf8ff 100%);
+    border-color: #d3e3fd;
+    box-shadow: 0 1px 4px rgba(66, 133, 244, 0.08);
+}
+
+.agent-thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-thinking-container.completed .agent-thinking-header {
+    cursor: pointer;
+}
+
+.agent-thinking-container.completed .agent-thinking-header:hover {
+    color: #1a73e8;
+}
+
+.agent-thinking-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.agent-thinking-container.active .agent-thinking-icon {
+    animation: thinking-pulse 2s infinite ease-in-out;
+}
+
+@keyframes thinking-pulse {
+    0% { transform: scale(0.95); opacity: 0.85; }
+    50% { transform: scale(1.15); opacity: 1; filter: drop-shadow(0 0 5px rgba(66, 133, 244, 0.6)); }
+    100% { transform: scale(0.95); opacity: 0.85; }
+}
+
+.agent-thinking-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+    color: #1f1f1f;
+    flex: 1;
+}
+
+.thinking-text {
+    font-size: 0.88rem;
+}
+
+.thinking-dots {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.thinking-dots span {
+    display: inline-block;
+    animation: thinking-dot-bounce 1.4s infinite ease-in-out both;
+    font-weight: 700;
+    color: #4285f4;
+}
+
+.thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+.thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0s; }
+
+@keyframes thinking-dot-bounce {
+    0%, 80%, 100% { transform: scale(0.4); opacity: 0.3; }
+    40% { transform: scale(1.2); opacity: 1; }
+}
+
+.thinking-timer {
+    font-size: 0.76rem;
+    color: #5f6368;
+    background: #eef2fa;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.agent-thinking-toggle {
+    display: flex;
+    align-items: center;
+    color: #70757a;
+    transition: transform 0.25s ease;
+}
+
+.agent-thinking-container.collapsed .agent-thinking-toggle svg {
+    transform: rotate(-90deg);
+}
+
+.agent-thinking-container.completed:not(.collapsed) .agent-thinking-toggle svg {
+    transform: rotate(0deg);
+}
+
+.agent-thinking-detail {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.thinking-shimmer-bar {
+    height: 3px;
+    width: 100%;
+    background: #e1e9f8;
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+}
+
+.thinking-shimmer-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, #4285f4, #9b72cb, #34a853, transparent);
+    animation: thinking-shimmer 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes thinking-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+}
+
+.thinking-status-text {
+    font-size: 0.8rem;
+    color: #5f6368;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: opacity 0.3s ease;
+}
+
+.agent-thinking-detail-content {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #d3e3fd;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: all 0.3s ease;
+}
+
+.agent-thinking-container.collapsed .agent-thinking-detail-content {
+    display: none;
+}
+
+.thinking-summary-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.thinking-tag {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    background: #e8f0fe;
+    color: #1967d2;
+    border-radius: 6px;
+    border: 1px solid #c2e7ff;
+}
+
+.thinking-log-preview {
+    font-size: 0.8rem;
+    color: #5f6368;
+    line-height: 1.5;
 }
 
 /* 输入区域 */

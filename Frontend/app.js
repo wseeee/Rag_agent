@@ -642,6 +642,9 @@ class SuperBizAgentApp {
 
     // 发送快速消息（普通对话）
     async sendQuickMessage(message) {
+        const thinkingState = this.addThinkingMessage('思考中');
+        const startTime = Date.now();
+
         try {
             const response = await fetch(`${this.apiBaseUrl}/chat`, {
                 method: 'POST',
@@ -660,18 +663,40 @@ class SuperBizAgentApp {
 
             const data = await response.json();
             
+            const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+            thinkingState.finish(duration);
+
             if (data.message === 'OK' && data.data && data.data.answer) {
-                this.addMessage('assistant', data.data.answer);
+                thinkingState.messageElement.classList.remove('streaming');
+                const messageContent = thinkingState.messageContent;
+                if (messageContent) {
+                    messageContent.innerHTML = this.renderMarkdown(data.data.answer);
+                    this.highlightCodeBlocks(messageContent);
+                }
+
+                // 保存到当前对话历史
+                this.currentChatHistory.push({
+                    type: 'assistant',
+                    content: data.data.answer,
+                    timestamp: new Date().toISOString()
+                });
+
+                this.scrollToBottom();
             } else {
                 throw new Error(data.message || '未知错误');
             }
         } catch (error) {
+            thinkingState.stop();
             throw error;
         }
     }
 
     // 发送流式消息
     async sendStreamMessage(message) {
+        const thinkingState = this.addThinkingMessage('思考中');
+        const startTime = Date.now();
+        let hasFinishedThinking = false;
+
         try {
             const response = await fetch(`${this.apiBaseUrl}/chat_stream`, {
                 method: 'POST',
@@ -688,8 +713,8 @@ class SuperBizAgentApp {
                 throw new Error(`HTTP错误: ${response.status}`);
             }
             
-            // 创建助手消息元素
-            const assistantMessageElement = this.addMessage('assistant', '', true);
+            const assistantMessageElement = thinkingState.messageElement;
+            const messageContent = thinkingState.messageContent;
             let fullResponse = '';
 
             // 处理流式响应
@@ -703,24 +728,24 @@ class SuperBizAgentApp {
                     const { done, value } = await reader.read();
                     
                     if (done) {
-                        // 流结束，将内容转换为Markdown渲染
+                        if (!hasFinishedThinking) {
+                            hasFinishedThinking = true;
+                            const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+                            thinkingState.finish(duration);
+                        }
                         if (assistantMessageElement) {
                             assistantMessageElement.classList.remove('streaming');
-                            const messageContent = assistantMessageElement.querySelector('.message-content');
                             if (messageContent) {
                                 messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                // 高亮代码块
                                 this.highlightCodeBlocks(messageContent);
                             }
                         }
-                        // 保存流式消息到历史记录
                         if (fullResponse) {
                             this.currentChatHistory.push({
                                 type: 'assistant',
                                 content: fullResponse,
                                 timestamp: new Date().toISOString()
                             });
-                            // 如果当前对话是从历史记录加载的，更新历史记录
                             if (this.isCurrentChatFromHistory) {
                                 this.updateCurrentChatHistory();
                                 this.renderChatHistory();
@@ -729,43 +754,36 @@ class SuperBizAgentApp {
                         break;
                     }
 
-                    // 解码数据并添加到缓冲区
                     buffer += decoder.decode(value, { stream: true });
-                    
-                    // 按行分割处理
                     const lines = buffer.split('\n');
-                    // 保留最后一行（可能不完整）
                     buffer = lines.pop() || '';
                     
                     for (const line of lines) {
                         if (line.trim() === '') continue;
                         
-                        // 解析SSE格式
                         if (line.startsWith('id: ')) {
                             continue;
                         } else if (line.startsWith('event: ')) {
                             currentEvent = line.substring(7);
-                            if (currentEvent === 'connected') {
-                                console.log('流式连接确认');
-                            } else if (currentEvent === 'done') {
-                                // 流结束，将内容转换为Markdown渲染
+                            if (currentEvent === 'done') {
+                                if (!hasFinishedThinking) {
+                                    hasFinishedThinking = true;
+                                    const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+                                    thinkingState.finish(duration);
+                                }
                                 if (assistantMessageElement) {
                                     assistantMessageElement.classList.remove('streaming');
-                                    const messageContent = assistantMessageElement.querySelector('.message-content');
                                     if (messageContent) {
                                         messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        // 高亮代码块
                                         this.highlightCodeBlocks(messageContent);
                                     }
                                 }
-                                // 保存流式消息到历史记录
                                 if (fullResponse) {
                                     this.currentChatHistory.push({
                                         type: 'assistant',
                                         content: fullResponse,
                                         timestamp: new Date().toISOString()
                                     });
-                                    // 如果当前对话是从历史记录加载的，更新历史记录
                                     if (this.isCurrentChatFromHistory) {
                                         this.updateCurrentChatHistory();
                                         this.renderChatHistory();
@@ -777,24 +795,24 @@ class SuperBizAgentApp {
                         } else if (line.startsWith('data: ')) {
                             const data = line.substring(6);
                             if (data === '[DONE]') {
-                                // 流结束标记，将内容转换为Markdown渲染
+                                if (!hasFinishedThinking) {
+                                    hasFinishedThinking = true;
+                                    const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+                                    thinkingState.finish(duration);
+                                }
                                 if (assistantMessageElement) {
                                     assistantMessageElement.classList.remove('streaming');
-                                    const messageContent = assistantMessageElement.querySelector('.message-content');
                                     if (messageContent) {
                                         messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        // 高亮代码块
                                         this.highlightCodeBlocks(messageContent);
                                     }
                                 }
-                                // 保存流式消息到历史记录
                                 if (fullResponse) {
                                     this.currentChatHistory.push({
                                         type: 'assistant',
                                         content: fullResponse,
                                         timestamp: new Date().toISOString()
                                     });
-                                    // 如果当前对话是从历史记录加载的，更新历史记录
                                     if (this.isCurrentChatFromHistory) {
                                         this.updateCurrentChatHistory();
                                         this.renderChatHistory();
@@ -803,7 +821,6 @@ class SuperBizAgentApp {
                                 return;
                             }
                             
-                            // 只处理message事件的数据
                             if (currentEvent === 'message') {
                                 let chunkText = '';
                                 try {
@@ -814,16 +831,21 @@ class SuperBizAgentApp {
                                         chunkText = data;
                                     }
                                 } catch (_) {
-                                    // 兼容非JSON格式
                                     chunkText = data === '' ? '\n' : data;
                                 }
-                                fullResponse += chunkText;
-                                
-                                if (assistantMessageElement) {
-                                    const messageContent = assistantMessageElement.querySelector('.message-content');
-                                    // 流式传输中保持纯文本实时展示
-                                    messageContent.textContent = fullResponse;
-                                    this.scrollToBottom();
+
+                                if (chunkText) {
+                                    // 收到有效内容时平滑结束思考状态
+                                    if (!hasFinishedThinking) {
+                                        hasFinishedThinking = true;
+                                        const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+                                        thinkingState.finish(duration);
+                                    }
+                                    fullResponse += chunkText;
+                                    if (messageContent) {
+                                        messageContent.textContent = fullResponse;
+                                        this.scrollToBottom();
+                                    }
                                 }
                             }
                         }
@@ -833,6 +855,7 @@ class SuperBizAgentApp {
                 reader.releaseLock();
             }
         } catch (error) {
+            thinkingState.stop();
             throw error;
         }
     }
@@ -900,6 +923,178 @@ class SuperBizAgentApp {
         }
 
         return messageDiv;
+    }
+
+    // 添加 Agent 深度思考消息组件（支持实时计时、脉冲微光、状态轮询与折叠）
+    addThinkingMessage(title = '思考中', customStatusList = null) {
+        const isFirstMessage = this.chatMessages && this.chatMessages.querySelectorAll('.message').length === 0;
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant streaming';
+
+        // 助手头像图标
+        const messageAvatar = document.createElement('div');
+        messageAvatar.className = 'message-avatar';
+        messageAvatar.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="white"/>
+            </svg>
+        `;
+        messageDiv.appendChild(messageAvatar);
+
+        const messageContentWrapper = document.createElement('div');
+        messageContentWrapper.className = 'message-content-wrapper';
+
+        // 深度思考容器
+        const thinkingContainer = document.createElement('div');
+        thinkingContainer.className = 'agent-thinking-container active';
+
+        // 状态提示语轮询列表
+        const statusList = customStatusList || [
+            '正在理解运维需求与排障上下文...',
+            '正在检索内部知识库与运维 SOP 手册...',
+            '正在调取 Sentry 异常监控与 Prometheus 告警指标...',
+            '正在推断故障根因并组织结构化诊断方案...'
+        ];
+        let statusIndex = 0;
+
+        thinkingContainer.innerHTML = `
+            <div class="agent-thinking-header">
+                <div class="agent-thinking-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z" fill="url(#sparkleGradientThinking)"/>
+                        <circle cx="19" cy="5" r="2" fill="#34A853"/>
+                        <circle cx="5" cy="19" r="1.5" fill="#4285F4"/>
+                        <defs>
+                            <linearGradient id="sparkleGradientThinking" x1="4" y1="2" x2="20" y2="18" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#4285F4"/>
+                                <stop offset="0.5" stop-color="#9B72CB"/>
+                                <stop offset="1" stop-color="#EA4335"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="agent-thinking-title">
+                    <span class="thinking-text">${title}</span>
+                    <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+                    <span class="thinking-timer">0s</span>
+                </div>
+            </div>
+            <div class="agent-thinking-detail">
+                <div class="thinking-shimmer-bar"></div>
+                <span class="thinking-status-text">${statusList[0]}</span>
+            </div>
+        `;
+
+        // 真实文本内容容器（初始为空）
+        const messageContent = document.createElement('div');
+        messageContent.className = 'message-content';
+
+        messageContentWrapper.appendChild(thinkingContainer);
+        messageContentWrapper.appendChild(messageContent);
+        messageDiv.appendChild(messageContentWrapper);
+
+        if (this.chatMessages) {
+            this.chatMessages.appendChild(messageDiv);
+            if (isFirstMessage && this.chatContainer) {
+                this.chatContainer.classList.remove('centered');
+                this.chatContainer.style.transition = 'all 0.5s ease';
+            }
+            this.scrollToBottom();
+        }
+
+        // 计时器与状态文案循环
+        const startTime = Date.now();
+        const timerEl = thinkingContainer.querySelector('.thinking-timer');
+        const statusEl = thinkingContainer.querySelector('.thinking-status-text');
+
+        const timerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            if (timerEl) timerEl.textContent = `${elapsed}s`;
+        }, 1000);
+
+        const statusInterval = setInterval(() => {
+            if (statusList.length > 1 && statusEl) {
+                statusIndex = (statusIndex + 1) % statusList.length;
+                statusEl.style.opacity = '0';
+                setTimeout(() => {
+                    if (statusEl) {
+                        statusEl.textContent = statusList[statusIndex];
+                        statusEl.style.opacity = '1';
+                    }
+                }, 200);
+            }
+        }, 2400);
+
+        return {
+            messageElement: messageDiv,
+            thinkingContainer: thinkingContainer,
+            messageContent: messageContent,
+            finish: (durationSec) => {
+                clearInterval(timerInterval);
+                clearInterval(statusInterval);
+                
+                const finalDuration = durationSec || Math.max(1, Math.round((Date.now() - startTime) / 1000));
+                thinkingContainer.classList.remove('active');
+                thinkingContainer.classList.add('completed', 'collapsed');
+
+                // 移除过渡期 detail
+                const detailEl = thinkingContainer.querySelector('.agent-thinking-detail');
+                if (detailEl) detailEl.remove();
+
+                // 更新头部图标为精致绿色勾选图标
+                const iconEl = thinkingContainer.querySelector('.agent-thinking-icon');
+                if (iconEl) {
+                    iconEl.innerHTML = `
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#34A853" stroke-width="2.5">
+                            <path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    `;
+                }
+
+                const titleEl = thinkingContainer.querySelector('.agent-thinking-title');
+                if (titleEl) {
+                    titleEl.innerHTML = `<span class="thinking-text">已深度思考 (${finalDuration} 秒)</span>`;
+                }
+
+                // 添加展开折叠按钮
+                const headerEl = thinkingContainer.querySelector('.agent-thinking-header');
+                if (headerEl) {
+                    const toggleEl = document.createElement('div');
+                    toggleEl.className = 'agent-thinking-toggle';
+                    toggleEl.innerHTML = `
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    `;
+                    headerEl.appendChild(toggleEl);
+
+                    headerEl.onclick = () => {
+                        thinkingContainer.classList.toggle('collapsed');
+                    };
+                }
+
+                // 添加折叠详情内容
+                const detailContent = document.createElement('div');
+                detailContent.className = 'agent-thinking-detail-content';
+                detailContent.innerHTML = `
+                    <div class="thinking-summary-tags">
+                        <span class="thinking-tag">⚡ 智能 Agent 链路</span>
+                        <span class="thinking-tag">📚 运维知识库关联</span>
+                        <span class="thinking-tag">🛠️ 监控告警与堆栈检索</span>
+                    </div>
+                    <div class="thinking-log-preview">
+                        Agent 已完成思考分析与工具执行，以下为解答：
+                    </div>
+                `;
+                thinkingContainer.appendChild(detailContent);
+            },
+            stop: () => {
+                clearInterval(timerInterval);
+                clearInterval(statusInterval);
+                thinkingContainer.remove();
+            }
+        };
     }
 
     // 添加带加载动画的消息
@@ -1204,7 +1399,7 @@ class SuperBizAgentApp {
     }
 
     // 发送智能运维请求
-    async sendAIOpsRequest(loadingMessageElement) {
+    async sendAIOpsRequest(thinkingState, startTime) {
         try {
             const response = await fetch(`${this.apiBaseUrl}/ai_ops`, {
                 method: 'POST',
@@ -1219,19 +1414,22 @@ class SuperBizAgentApp {
 
             const data = await response.json();
             
+            const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+            if (thinkingState && thinkingState.finish) {
+                thinkingState.finish(duration);
+            }
+
             if (data.message === 'OK' && data.data) {
-                // 解析Result中的response字段
                 let responseText = '';
                 try {
                     const resultObj = JSON.parse(data.data.result);
                     responseText = resultObj.response || data.data.result;
                 } catch (e) {
-                    // 如果解析失败，直接使用result
                     responseText = data.data.result;
                 }
                 
-                // 更新消息内容
-                this.updateAIOpsMessage(loadingMessageElement, responseText, data.data.detail || []);
+                const msgEl = thinkingState.messageElement || thinkingState;
+                this.updateAIOpsMessage(msgEl, responseText, data.data.detail || []);
             } else {
                 throw new Error(data.message || '未知错误');
             }
@@ -1262,11 +1460,15 @@ class SuperBizAgentApp {
             return;
         }
 
-        // 移除加载动画相关的类和内容
+        // 移除加载动画与思考相关的类和内容
         messageContent.classList.remove('loading-message-content');
         messageContent.textContent = '';
         
-        // 移除加载图标（如果存在）
+        // 移除思考组件或加载图标
+        const thinkingContainer = messageElement.querySelector('.agent-thinking-container');
+        if (thinkingContainer) {
+            thinkingContainer.remove();
+        }
         const loadingIcon = messageContent.querySelector('.loading-spinner-icon');
         if (loadingIcon) {
             loadingIcon.remove();
@@ -1418,25 +1620,27 @@ class SuperBizAgentApp {
         // 新建对话
         this.newChat();
         
-        // 添加"分析中..."的消息（带旋转动画）
-        const loadingMessage = this.addLoadingMessage('分析中...');
-        this.currentAIOpsMessage = loadingMessage; // 保存消息引用用于后续更新
+        // 使用 Agent 深度思考组件
+        const thinkingState = this.addThinkingMessage('智能运维分析中', [
+            '正在启动运维 Agent 规划器 (Planner)...',
+            '正在检索 Prometheus 活跃告警清单...',
+            '正在查询 Sentry 未解决异常与完整错误调用栈...',
+            '正在匹配内部知识库故障处理 SOP 与标准方案...',
+            '正在推断故障根因并生成结构化诊断报告...'
+        ]);
+        const startTime = Date.now();
+        this.currentAIOpsMessage = thinkingState.messageElement;
         
         // 设置发送状态
         this.isStreaming = true;
         this.updateUI();
 
         try {
-            await this.sendAIOpsRequest(loadingMessage);
+            await this.sendAIOpsRequest(thinkingState, startTime);
         } catch (error) {
             console.error('智能运维分析失败:', error);
-            // 更新消息为错误信息
-            if (loadingMessage) {
-                const messageContent = loadingMessage.querySelector('.message-content');
-                if (messageContent) {
-                    messageContent.textContent = '抱歉，智能运维分析时出现错误：' + error.message;
-                }
-            }
+            thinkingState.stop();
+            this.addMessage('assistant', '抱歉，智能运维分析时出现错误：' + error.message);
         } finally {
             this.isStreaming = false;
             this.currentAIOpsMessage = null;
