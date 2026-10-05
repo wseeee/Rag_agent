@@ -70,7 +70,9 @@ class SuperBizAgentApp {
         }
         
         try {
-            let html = marked.parse(content);
+            // 规范化换行并确保 Markdown 表格前有空行，以兼容 GFM 表格语法
+            let preprocessed = content.replace(/\r\n/g, '\n').replace(/([^\n])\n(\|.*\|)/g, '$1\n\n$2');
+            let html = marked.parse(preprocessed);
             // 自动将出处引用如 (来源#1: 告警处理手册.md) 转换为精美交互角标
             html = html.replace(/[(（](?:来源|参考)#?(\d+):\s*([^)]+)[)）]/g, (match, id, file) => {
                 const cleanFile = file.trim();
@@ -803,16 +805,23 @@ class SuperBizAgentApp {
                             
                             // 只处理message事件的数据
                             if (currentEvent === 'message') {
-                                // 如果 data 为空字符串，认为是换行
-                                if (data === '') {
-                                    fullResponse += '\n';
-                                } else {
-                                    fullResponse += data;
+                                let chunkText = '';
+                                try {
+                                    const parsed = JSON.parse(data);
+                                    if (parsed && typeof parsed.content === 'string') {
+                                        chunkText = parsed.content;
+                                    } else {
+                                        chunkText = data;
+                                    }
+                                } catch (_) {
+                                    // 兼容非JSON格式
+                                    chunkText = data === '' ? '\n' : data;
                                 }
+                                fullResponse += chunkText;
                                 
                                 if (assistantMessageElement) {
                                     const messageContent = assistantMessageElement.querySelector('.message-content');
-                                    // 流式消息暂时使用纯文本显示
+                                    // 流式传输中保持纯文本实时展示
                                     messageContent.textContent = fullResponse;
                                     this.scrollToBottom();
                                 }
