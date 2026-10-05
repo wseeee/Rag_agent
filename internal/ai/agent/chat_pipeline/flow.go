@@ -3,33 +3,16 @@ package chat_pipeline
 import (
 	"SuperBizAgent/internal/ai/tools"
 	"context"
-	"io"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
-	"github.com/cloudwego/eino/schema"
 )
 
 func newReactAgentLambda(ctx context.Context) (lba *compose.Lambda, err error) {
 	config := &react.AgentConfig{
 		MaxStep:            25,
 		ToolReturnDirectly: map[string]struct{}{},
-		StreamToolCallChecker: func(ctx context.Context, sr *schema.StreamReader[*schema.Message]) (bool, error) {
-			defer sr.Close()
-			for {
-				msg, err := sr.Recv()
-				if err == io.EOF {
-					return false, nil
-				}
-				if err != nil {
-					return false, err
-				}
-				if len(msg.ToolCalls) > 0 {
-					return true, nil
-				}
-			}
-		},
 	}
 	chatModelIns11, err := newChatModel(ctx)
 	if err != nil {
