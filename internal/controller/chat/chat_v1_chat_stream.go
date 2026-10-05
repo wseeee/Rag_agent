@@ -6,6 +6,7 @@ import (
 	"SuperBizAgent/internal/ai/agent/memory"
 	"SuperBizAgent/pkg/log_call_back"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -57,7 +58,11 @@ func (c *ControllerV1) ChatStream(ctx context.Context, req *v1.ChatStreamReq) (r
 			client.SendToClient("error", err.Error())
 			return &v1.ChatStreamRes{}, nil
 		}
+		if chunk.Content == "" {
+			continue
+		}
 		fullResponse.WriteString(chunk.Content)
-		client.SendToClient("message", chunk.Content)
+		payload, _ := json.Marshal(map[string]string{"content": chunk.Content})
+		client.SendToClient("message", string(payload))
 	}
 }
